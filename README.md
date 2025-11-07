@@ -1,6 +1,6 @@
 ![Teaser image](images/teaser.png "Teaser image")
 
-# FLIP: A Tool for Visualizing and Communicating Errors in Rendered Images (v1.6)
+# FLIP: A Tool for Visualizing and Communicating Errors in Rendered Images (v1.7)
 
 By
 [Pontus Ebelin](https://research.nvidia.com/person/pontus-ebelin)
@@ -26,6 +26,8 @@ The changes made for the different versions of FLIP are summarized in the [versi
 
 [An image gallery](https://research.nvidia.com/node/3525) displaying a large quantity of reference/test images and corresponding error maps from
 different metrics.
+
+**Note**: since v1.7, the automatic stop exposure in HDR-FLIP is able to handle reference images whose median luminance is 0.
 
 **Note**: since v1.6, the Python version of FLIP can now be installed via `pip install flip-evaluator`.
 
@@ -136,4 +138,4 @@ Should your work use the FLIP tool in a more general fashion, please cite the Ra
 
 # Acknowledgements
 We appreciate the following peoples' contributions to this repository:
-Jonathan Granskog, Jacob Munkberg, Jon Hasselgren, Jefferson Amstutz, Alan Wolfe, Killian Herveau, Vinh Truong, Philippe Dagobert, Hannes Hergeth, Matt Pharr, Tizian Zeltner, Jan Honsbrok, Chris Zhang, Wenzel Jakob, and Julian Amann.
+Jonathan Granskog, Jacob Munkberg, Jon Hasselgren, Jefferson Amstutz, Alan Wolfe, Killian Herveau, Vinh Truong, Philippe Dagobert, Hannes Hergeth, Matt Pharr, Tizian Zeltner, Jan Honsbrok, Chris Zhang, Wenzel Jakob, Julian Amann, and Xijie Yang.

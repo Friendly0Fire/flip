@@ -2227,6 +2227,7 @@ namespace FLIP
             size_t medianLocation = luminances.size() / 2;
             std::nth_element(luminances.begin(), luminances.begin() + medianLocation, luminances.end());
             float Ymedian = luminances[medianLocation];
+            Ymedian = std::max(Ymedian, std::numeric_limits<float>::epsilon()); // Avoid median = 0 when more than half of the image's pixels are black.
 
             startExposure = log2(xMax / Ymax);
             stopExposure = log2(xMax / Ymedian);

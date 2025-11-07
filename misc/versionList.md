@@ -3,6 +3,11 @@
 In addition to various minor changes, the following was
 changed for the different versions of FLIP:
 
+# Version 1.7 (commit ?)
+- Fixed memory leaks in the C++/CUDA/Python versions of FLIP.
+- HDR-FLIP: Fixed crashes that followed from the reference's median being 0.
+    - Automatic start and stop exposures in HDR-FLIP are computed using statistics of the reference image. For the stop exposure, we use the median luminance of the reference. When that is 0, we used to get undefined behavior or a crash. Version 1.7 fixes this by clamping the median to have a minimum value of [FLT_EPSILON](https://learn.microsoft.com/en-us/cpp/c-language/limits-on-floating-point-constants?view=msvc-170).
+
 # Version 1.6 (commit 7967578)
 - Flipped the ꟻ in ꟻLIP. The entire name (FLIP) should now be readable on all devices.
 - Published Python version of FLIP to PyPI (URL: https://pypi.org/project/flip-evaluator/).

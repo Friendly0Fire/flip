@@ -383,6 +383,7 @@ def compute_start_stop_exposures(reference, tone_mapper, tmax, tmin):
 	dim = Y_reference.size()
 	Y_ref = Y_reference.view(dim[0], dim[1], dim[2]*dim[3])
 	Y_lo = torch.median(Y_ref, dim=2).values.unsqueeze(2).unsqueeze(3)
+	Y_lo = torch.clamp(Y_lo, min=torch.finfo(torch.float32).eps) # Avoid median = 0 when more than half of the image's pixels are black.
 	stop_exposure = torch.log2(x_min / Y_lo)
 
 	return start_exposure, stop_exposure

@@ -255,6 +255,7 @@ namespace ImageHelpers
         if (loadImage(fileName, imgWidth, imgHeight, pixels))
         {
             dstImage.setPixels(pixels, imgWidth, imgHeight);
+            delete[] pixels;
             return true;
         }
         return false;
@@ -343,15 +344,14 @@ namespace ImageHelpers
 
         const char* error;
         int ret = SaveEXRImageToFile(&exrImage, &exrHeader, fileName.c_str(), &error);
+        free(exrHeader.channels);
+        free(exrHeader.pixel_types);
+        free(exrHeader.requested_pixel_types);
         if (ret != TINYEXR_SUCCESS)
         {
             std::cerr << "Failed to save EXR file <" << fileName << ">: " << error << "\n";
             return false;
         }
-
-        free(exrHeader.channels);
-        free(exrHeader.pixel_types);
-        free(exrHeader.requested_pixel_types);
 
         return true;
     }
