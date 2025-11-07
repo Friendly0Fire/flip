@@ -247,7 +247,7 @@ namespace ImageHelpers
         return bOk;
     }
 
-    bool load(FLIP::image<FLIP::color3>& dstImage, const std::string& fileName)
+    bool load(FLIP::image<FLIP::float3>& dstImage, const std::string& fileName)
     {
         int imgWidth;
         int imgHeight;
@@ -261,7 +261,7 @@ namespace ImageHelpers
         return false;
     }
 
-    bool pngSave(const std::string& filename, FLIP::image<FLIP::color3>& image)
+    bool pngSave(const std::string& filename, FLIP::image<FLIP::float3>& image)
     {
         unsigned char* pixels = new unsigned char[3 * image.getWidth() * image.getHeight()];
 
@@ -275,11 +275,11 @@ namespace ImageHelpers
             for (int x = 0; x < image.getWidth(); x++)
             {
                 int index = image.index(x, y);
-                FLIP::color3 color = image.get(x, y);
+                FLIP::float3 color = image.get(x, y);
 
-                pixels[3 * index + 0] = (unsigned char)(255.0f * std::clamp(color.x, 0.0f, 1.0f) + 0.5f);
-                pixels[3 * index + 1] = (unsigned char)(255.0f * std::clamp(color.y, 0.0f, 1.0f) + 0.5f);
-                pixels[3 * index + 2] = (unsigned char)(255.0f * std::clamp(color.z, 0.0f, 1.0f) + 0.5f);
+                pixels[3 * index + 0] = (unsigned char)(255.0f * std::clamp(color.x(), 0.0f, 1.0f) + 0.5f);
+                pixels[3 * index + 1] = (unsigned char)(255.0f * std::clamp(color.y(), 0.0f, 1.0f) + 0.5f);
+                pixels[3 * index + 2] = (unsigned char)(255.0f * std::clamp(color.z(), 0.0f, 1.0f) + 0.5f);
             }
         }
 
@@ -289,7 +289,7 @@ namespace ImageHelpers
         return (ok != 0);
     }
 
-    bool exrSave(const std::string& fileName, FLIP::image<FLIP::color3>& image)
+    bool exrSave(const std::string& fileName, FLIP::image<FLIP::float3>& image)
     {
 #ifdef FLIP_ENABLE_CUDA
         image.synchronizeHost();
@@ -307,10 +307,10 @@ namespace ImageHelpers
         {
             for (int x = 0; x < image.getWidth(); x++)
             {
-                FLIP::color3 p = image.get(x, y);
-                vImages[0][pixelIndex] = p.r;
-                vImages[1][pixelIndex] = p.g;
-                vImages[2][pixelIndex] = p.b;
+                FLIP::float3 p = image.get(x, y);
+                vImages[0][pixelIndex] = p.r();
+                vImages[1][pixelIndex] = p.g();
+                vImages[2][pixelIndex] = p.b();
                 pixelIndex++;
             }
         }

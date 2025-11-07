@@ -199,7 +199,7 @@ namespace FLIPTool
 
         if (!commandLine.optionSet("no-error-map"))
         {
-            FLIP::image<FLIP::color3> pngResult(errorMapFLIP.getWidth(), errorMapFLIP.getHeight());
+            FLIP::image<FLIP::float3> pngResult(errorMapFLIP.getWidth(), errorMapFLIP.getHeight());
             if (!commandLine.optionSet("no-magma"))
             {
                 pngResult.colorMap(errorMapFLIP, FLIP::magmaMap);
@@ -215,7 +215,7 @@ namespace FLIPTool
         {
             if (!commandLine.optionSet("no-exposure-map"))
             {
-                FLIP::image<FLIP::color3> pngMaxErrorExposureMap(maxErrorExposureMap.getWidth(), maxErrorExposureMap.getHeight());
+                FLIP::image<FLIP::float3> pngMaxErrorExposureMap(maxErrorExposureMap.getWidth(), maxErrorExposureMap.getHeight());
                 pngMaxErrorExposureMap.colorMap(maxErrorExposureMap, FLIP::viridisMap);
                 ImageHelpers::pngSave(destinationDirectory + "/" + exposureFileName.toString(), pngMaxErrorExposureMap);
             }
@@ -235,7 +235,7 @@ namespace FLIPTool
     // Optionally store the intermediate LDR images and LDR-FLIP error maps produced during the evaluation of HDR-FLIP.
     static void saveIntermediateHDRFLIPOutput(commandline& commandLine, const FLIP::Parameters& parameters, const std::string& basename, const FLIP::filename& flipFileName,
         const FLIP::filename& referenceFileName, const FLIP::filename& testFileName, const std::string& destinationDirectory,
-        std::vector<FLIP::image<float>*> intermediateLDRFLIPImages, std::vector<FLIP::image<FLIP::color3>*> intermediateLDRImages)
+        std::vector<FLIP::image<float>*> intermediateLDRFLIPImages, std::vector<FLIP::image<FLIP::float3>*> intermediateLDRImages)
     {
         if (intermediateLDRImages.size() > 0)
         {
@@ -263,8 +263,8 @@ namespace FLIPTool
                     rFileName.setName(basename + ".reference." + "." + expCount);
                     tFileName.setName(basename + ".test." + "." + expCount);
                 }
-                FLIP::image<FLIP::color3>* rImage = intermediateLDRImages[0];
-                FLIP::image<FLIP::color3>* tImage = intermediateLDRImages[1];
+                FLIP::image<FLIP::float3>* rImage = intermediateLDRImages[0];
+                FLIP::image<FLIP::float3>* tImage = intermediateLDRImages[1];
                 intermediateLDRImages.erase(intermediateLDRImages.begin());
                 intermediateLDRImages.erase(intermediateLDRImages.begin());
                 rImage->LinearRGBTosRGB();
@@ -292,7 +292,7 @@ namespace FLIPTool
                 FLIP::image<float>* flipImage = intermediateLDRFLIPImages[0];
                 intermediateLDRFLIPImages.erase(intermediateLDRFLIPImages.begin());
 
-                FLIP::image<FLIP::color3> pngResult(flipImage->getWidth(), flipImage->getHeight());
+                FLIP::image<FLIP::float3> pngResult(flipImage->getWidth(), flipImage->getHeight());
 
                 if (!commandLine.optionSet("no-magma"))
                 {
@@ -539,7 +539,7 @@ namespace FLIPTool
             std::cout << "     Pixels per degree: " << int(std::round(parameters.PPD)) << "\n" << (!bUseHDR ? "\n" : "");
         }
 
-        FLIP::image<FLIP::color3> referenceImage;
+        FLIP::image<FLIP::float3> referenceImage;
         bool refImageOk = ImageHelpers::load(referenceImage, referenceFileName.toString());   // Load reference image.
         if (!refImageOk)
         {
@@ -564,7 +564,7 @@ namespace FLIPTool
         {
             pooledValues = FLIPPooling::pooling<float>(100); // Reset pooledValues to remove accumulation issues.
             std::vector<FLIP::image<float>*> intermediateLDRFLIPImages;
-            std::vector<FLIP::image<FLIP::color3>*> intermediateLDRImages;
+            std::vector<FLIP::image<FLIP::float3>*> intermediateLDRImages;
             testFileName = testFileNameString;
 
             if (!std::filesystem::exists(testFileName.toString()))
@@ -573,7 +573,7 @@ namespace FLIPTool
                 exit(EXIT_FAILURE);
             }
             
-            FLIP::image<FLIP::color3> testImage;
+            FLIP::image<FLIP::float3> testImage;
             bool testImageOk = ImageHelpers::load(testImage, testFileName.toString());     // Load test image.
             if (!testImageOk)
             {

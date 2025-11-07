@@ -70,8 +70,8 @@ private:
 public:
     unique_vector_iterator(const unique_vector<T>* pVector, size_t position) : mPosition(position), mpUniqueVector(pVector) { }
     bool operator!=(const unique_vector_iterator& other) const { return this->mPosition != other.mPosition; }
-    T operator*(void) const { return this->mpUniqueVector->at(this->mPosition); }
-    const unique_vector_iterator& operator++(void) { this->mPosition++; return *this; }
+    T operator*() const { return this->mpUniqueVector->at(this->mPosition); }
+    const unique_vector_iterator& operator++() { this->mPosition++; return *this; }
     unique_vector_iterator operator+(size_t v) const { return unique_vector_iterator(this->mpUniqueVector, this->mPosition + v); }
 };
 
@@ -89,7 +89,7 @@ public:
     T at(size_t index) const { return this->mVector.at(index); }
     T operator[](size_t index) const { return this->mVector.at(index); }
     T& operator[](size_t index) { return this->mVector.at(index); }
-    size_t size(void) const { return this->mVector.size(); }
+    size_t size() const { return this->mVector.size(); }
     bool contains(T value) const { return std::find(this->mVector.begin(), this->mVector.end(), value) != mVector.end(); }
 
     iterator begin(size_t begin = 0) const { return iterator(this, begin); }
@@ -190,17 +190,17 @@ public:
         parse(argc, argv, allowedOptions);
     }
 
-    bool getError(void) const 
+    bool getError() const 
     {
         return mError;
     }
 
-    std::string getErrorString(void) const
+    std::string getErrorString() const
     {
         return mErrorString;
     }
 
-    void clear(void)
+    void clear()
     {
         mCommand = "";
         mOptions.clear();
@@ -312,12 +312,12 @@ public:
         return parse(int(vpCommandLine.size()), &vpCommandLine[0], allowedOptions);
     }
 
-    inline const std::string& getCommand(void) const
+    inline const std::string& getCommand() const
     {
         return mCommand;
     }
 
-    inline size_t getNumArguments(void) const
+    inline size_t getNumArguments() const
     {
         return this->mArguments.size();
     }
@@ -328,7 +328,7 @@ public:
         return this->mArguments[index];
     }
 
-    const std::vector<std::string>& getArguments(void) const
+    const std::vector<std::string>& getArguments() const
     {
         return this->mArguments;
     }
@@ -367,7 +367,7 @@ public:
         return this->mOptions.find(option) != this->mOptions.end();
     }
 
-    void print(void)
+    void print()
     {
         commandline_options& ao = this->mAllowedOptions;
 

@@ -26,6 +26,12 @@
     <ClInclude Include="pooling.h">
       <Filter>tool</Filter>
     </ClInclude>
+    <ClInclude Include="..\util.h" />
+    <ClInclude Include="..\maps.h" />
+    <ClInclude Include="..\tensor.h" />
+    <ClInclude Include="..\vecs.h" />
+    <ClInclude Include="..\gaussian.h" />
+    <ClInclude Include="..\float_vec.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="tool">

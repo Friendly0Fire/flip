@@ -287,9 +287,9 @@ namespace FLIPPooling
         pooling(size_t buckets) { mHistogram.resize(buckets); clear(); }
 
         histogram<T>& getHistogram() { return mHistogram; }
-        T getMinValue(void) const { return mMinValue; }
-        T getMaxValue(void) const { return mMaxValue; }
-        T getMean(void) const { return mValueSum / mValueCount; }
+        T getMinValue() const { return mMinValue; }
+        T getMaxValue() const { return mMaxValue; }
+        T getMean() const { return mValueSum / mValueCount; }
 
         double getWeightedPercentile(const double percent) const
         {

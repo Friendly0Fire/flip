@@ -96,13 +96,13 @@ namespace FLIP
             // Remove forbidden characters from the name.
             this->mName = std::regex_replace(name, std::regex("\\\\|/|:|\\*|\\?|\\||\"|<|>"), "_");
         }
-        inline const std::string& getName(void) const { return this->mName; }
+        inline const std::string& getName() const { return this->mName; }
 
         inline void setExtension(std::string extension) { this->mExtension = extension; }
-        inline const std::string& getExtension(void) const { return this->mExtension; }
+        inline const std::string& getExtension() const { return this->mExtension; }
 
 
-        static const filename& empty(void)
+        static const filename& empty()
         {
             static const filename emptyFileName = filename();
             return emptyFileName;
@@ -139,7 +139,7 @@ namespace FLIP
         }
 
 
-        void init(void)
+        void init()
         {
             this->mDirectory = "";
             this->mName = "";
