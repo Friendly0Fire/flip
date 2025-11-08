@@ -6,34 +6,25 @@ namespace FLIP {
 template<typename T>
 class tensor {
 protected:
-    int3 mDim = { 0, 0, 0 };
-    int mArea = 0, mVolume = 0;
-    T* mvpHostData = nullptr;
+    int3 dims_ = { 0, 0, 0 };
+    uint32_t area_ = 0, volume_ = 0;
+    std::vector<T> data_;
+
 protected:
-    bool allocateHost() {
-        this->mvpHostData = (T*)malloc(this->mVolume * sizeof(T));
+    void init(const int3 dims, bool should_clear = false, const T& clear_color = T(0.0f)) {
+        dims_ = dims;
+        area_ = dims.x() * dims.y();
+        volume_ = dims.x() * dims.y() * dims.z();
 
-        if(this->mvpHostData == nullptr) {
-            return false;
-        }
+        data_.resize(volume_);
 
-        return true;
-    }
-
-    void init(const int3 dim, bool bClear = false, T clearColor = T(0.0f)) {
-        this->mDim = dim;
-        this->mArea = dim.x() * dim.y();
-        this->mVolume = dim.x() * dim.y() * dim.z();
-
-        allocateHost();
-
-        if(bClear) {
-            this->clear(clearColor);
+        if(should_clear) {
+            clear(clear_color);
         }
     }
 
 public:
-    tensor() { }
+    tensor() = default;
 
     tensor(const int width, const int height, const int depth) {
         this->init({ width, height, depth });
@@ -47,181 +38,180 @@ public:
         this->init(dim, true, clearColor);
     }
 
-    tensor(tensor& image) {
-        this->init(image.mDim);
+    tensor(const tensor& image) {
+        this->init(image.dims_);
         this->copy(image);
     }
 
-    tensor(const float3* pColorMap, int size) {
-        this->init({ size, 1, 1 });
-        if(this->mvpHostData != nullptr) {
-            memcpy((void*)this->mvpHostData, pColorMap, size * sizeof(float3));
-        }
-    }
-    ~tensor() {
-        free(this->mvpHostData);
+    tensor(std::span<const T> input) {
+        init({ static_cast<int>(input.size()), 1, 1 });
+        std::ranges::copy(input, data_.begin());
     }
 
-    T* getHostData() {
-        return this->mvpHostData;
+    tensor(std::span<const T> input, int width) {
+        init({ width, input.size() / width, 1 });
+        std::ranges::copy(input, data_.begin());
+    }
+
+    tensor(std::span<const float> input) requires (!std::same_as<T, float>) {
+        std::span<const T> input2(reinterpret_cast<const T*>(input.data()), input.size() / T::count);
+        init({ input2.size(), 1, 1 });
+        std::ranges::copy(input2, data_.begin());
+    }
+
+    tensor(std::span<const float> input, int width) requires (!std::same_as<T, float>) {
+        std::span<const T> input2(reinterpret_cast<const T*>(input.data()), input.size() / T::count);
+        init({ width, static_cast<int>(input2.size() / width), 1 });
+        std::ranges::copy(input2, data_.begin());
+    }
+
+    const T* get_data() const {
+        return data_.data();
     }
 
     inline int index(int x, int y = 0, int z = 0) const {
-        return (z * this->mDim.y() + y) * mDim.x() + x;
+        return (z * dims_.y() + y) * dims_.x() + x;
     }
 
-    const T& get(int x, int y, int z) const {
-        return this->mvpHostData[this->index(x, y, z)];
+    [[nodiscard]] const T& get(int x, int y, int z) const {
+        return data_[index(x, y, z)];
     }
 
     void set(int x, int y, int z, const T& value) {
-        this->mvpHostData[this->index(x, y, z)] = value;
+        data_[index(x, y, z)] = value;
     }
 
-    void setPixels(const float* pPixels, const int width, const int height) {
-        this->init({ width, height, 1 });
-        memcpy((void*)this->mvpHostData, pPixels, size_t(width) * height * sizeof(T));
+    //void setPixels(const float* pPixels, const int width, const int height) {
+    //    init({ width, height, 1 });
+    //    memcpy((void*)data_, pPixels, size_t(width) * height * sizeof(T));
+    //}
+
+    int3 get_dimensions() const {
+        return dims_;
     }
 
-    int3 getDimensions() const {
-        return this->mDim;
+    int get_width() const {
+        return dims_.x();
     }
 
-    int getWidth() const {
-        return this->mDim.x();
+    int get_height() const {
+        return dims_.y();
     }
 
-    int getHeight() const {
-        return this->mDim.y();
+    int get_depth() const {
+        return dims_.z();
     }
 
-    int getDepth() const {
-        return this->mDim.z();
-    }
-
-    void colorMap(const tensor<float>& srcImage, tensor<float3>& colorMap) requires std::same_as<T, float3> {
-        for(int z = 0; z < this->getDepth(); z++) {
+    void apply_color_map(const tensor<float>& srcImage, const tensor<float3>& colorMap) requires std::same_as<T, float3> {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, colorMap.get(int(srcImage.get(x, y, z) * 255.0f + 0.5f) % colorMap.getWidth(), 0, 0));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, colorMap.get(static_cast<int>(srcImage.get(x, y, z) * 255.0f + 0.5f) % colorMap.get_width(), 0, 0));
                 }
             }
         }
     }
 
-    void sRGBToYCxCz() {
-        for(int z = 0; z < this->getDepth(); z++) {
+    void srgb_to_ycxcz() {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, XYZToYCxCz(LinearRGBToXYZ(sRGBToLinearRGB(this->get(x, y, z)))));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, FLIP::xyz_to_ycxcz(FLIP::linear_rgb_to_xyz(FLIP::srgb_to_linear_rgb(get(x, y, z)))));
                 }
             }
         }
     }
 
-    void sRGBToLinearRGB() {
-        for(int z = 0; z < this->getDepth(); z++) {
+    void srgb_to_linear_rgb() {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, FLIP::sRGBToLinearRGB(this->get(x, y, z)));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, FLIP::srgb_to_linear_rgb(get(x, y, z)));
                 }
             }
         }
     }
 
-    void LinearRGBToYCxCz() {
-        for(int z = 0; z < this->getDepth(); z++) {
+    void linear_rgb_to_ycxcz() {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, FLIP::XYZToYCxCz(FLIP::LinearRGBToXYZ(this->get(x, y, z))));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, FLIP::xyz_to_ycxcz(FLIP::linear_rgb_to_xyz(get(x, y, z))));
                 }
             }
         }
     }
 
-    void LinearRGBTosRGB() {
-        for(int z = 0; z < this->getDepth(); z++) {
+    void linear_rgb_to_srgb() {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, FLIP::LinearRGBTosRGB(this->get(x, y, z)));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, FLIP::linear_rgb_to_srgb(get(x, y, z)));
                 }
             }
         }
     }
 
     void clear(const T color = T(0.0f)) {
-        for(int z = 0; z < this->getDepth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, color);
-                }
-            }
-        }
+        std::ranges::fill(data_, color);
     }
 
     void clamp(float low = 0.0f, float high = 1.0f) {
-        for(int z = 0; z < this->getDepth(); z++) {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, float3::clamp(this->get(x, y, z), low, high));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, get(x, y, z).clamp(low, high));
                 }
             }
         }
     }
 
-    void toneMap(std::string tm) {
-        int toneMapper = 1;
-        if(tm == "reinhard") {
-            for(int z = 0; z < this->getDepth(); z++) {
+    void apply_tonemap(tonemapper tm) {
+        if(tm == tonemapper::reinhard) {
+            for(int z = 0; z < get_depth(); z++) {
             #pragma omp parallel for
-                for(int y = 0; y < this->getHeight(); y++) {
-                    for(int x = 0; x < this->getWidth(); x++) {
-                        float3 color = this->get(x, y, z);
-                        float luminance = linearRGBToLuminance(color);
+                for(int y = 0; y < get_height(); y++) {
+                    for(int x = 0; x < get_width(); x++) {
+                        float3 color = get(x, y, z);
+                        float luminance = linear_rgb_to_luminance(color);
                         float factor = 1.0f / (1.0f + luminance);
-                        this->set(x, y, z, color * factor);
+                        set(x, y, z, color * factor);
                     }
                 }
             }
             return;
         }
 
-        if(tm == "aces")
-            toneMapper = 1;
-        if(tm == "hable")
-            toneMapper = 2;
-
-        for(int z = 0; z < this->getDepth(); z++) {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    const float* tc = ToneMappingCoefficients[toneMapper];
-                    float3 color = this->get(x, y, z);
-                    this->set(x, y, z, float3(((color * color) * tc[0] + color * tc[1] + tc[2]) / (color * color * tc[3] + color * tc[4] + tc[5])));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    const float* tc = ToneMappingCoefficients[std::to_underlying(tm)];
+                    float3 color = get(x, y, z);
+                    set(x, y, z, float3(((color * color) * tc[0] + color * tc[1] + tc[2]) / (color * color * tc[3] + color * tc[4] + tc[5])));
                 }
             }
         }
     }
 
-    void copy(tensor<T>& srcImage) {
-        if(this->mDim.x() == srcImage.getWidth() && this->mDim.y() == srcImage.getHeight() && this->mDim.z() == srcImage.getDepth()) {
-            memcpy((void*)this->mvpHostData, srcImage.getHostData(), this->mVolume * sizeof(T));
+    void copy(const tensor<T>& srcImage) {
+        if(dims_.x() == srcImage.get_width() && dims_.y() == srcImage.get_height() && dims_.z() == srcImage.get_depth()) {
+            data_ = srcImage.data_;
         }
     }
 
-    void copyFloatToColor3(tensor<float>& srcImage) {
-        for(int z = 0; z < this->getDepth(); z++) {
+    void expand_grayscale(const tensor<float>& srcImage) {
+        for(int z = 0; z < get_depth(); z++) {
         #pragma omp parallel for
-            for(int y = 0; y < this->getHeight(); y++) {
-                for(int x = 0; x < this->getWidth(); x++) {
-                    this->set(x, y, z, float3(srcImage.get(x, y, z)));
+            for(int y = 0; y < get_height(); y++) {
+                for(int x = 0; x < get_width(); x++) {
+                    set(x, y, z, float3(srcImage.get(x, y, z)));
                 }
             }
         }

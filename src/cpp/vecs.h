@@ -39,6 +39,8 @@ class floatN {
         return f;
     }
 public:
+    inline static constexpr size_t count = N;
+
     std::array<float, N> data = { 0.f };
 
     auto&& x(this auto&& self)                   { return FWD(self).data[0]; }
@@ -201,16 +203,16 @@ public:
         return spread(v0, v1, LIFT(std::max));
     }
 
-    static inline floatN abs(floatN v) {
-        return v.spread(LIFT(std::abs));
+    inline floatN abs() const {
+        return spread(LIFT(std::abs));
     }
 
-    static inline floatN sqrt(floatN v) {
-        return v.spread(LIFT(std::sqrt));
+    inline floatN sqrt() const {
+        return spread(LIFT(std::sqrt));
     }
 
-    constexpr static inline floatN clamp(floatN v, float min = 0.0f, float max = 1.0f) {
-        return v.spread([min, max](float x) { return std::clamp(x, min, max); });
+    constexpr inline floatN clamp(float min = 0.0f, float max = 1.0f) const {
+        return spread([min, max](float x) { return std::clamp(x, min, max); });
     }
 
     template<typename... Args> requires (std::is_arithmetic_v<Args> && ...)
@@ -234,22 +236,22 @@ using float3 = floatN<3>;
 using float4 = floatN<4>;
 
 template<size_t N>
-constexpr static inline float linearRGBToLuminance(floatN<N> linearRGB) requires (N >= 3) {
+constexpr static inline float linear_rgb_to_luminance(floatN<N> linearRGB) requires (N >= 3) {
     return 0.2126f * linearRGB[0] + 0.7152f * linearRGB[1] + 0.0722f * linearRGB[2];
 }
 
 template<size_t N>
-static inline floatN<N> sRGBToLinearRGB(floatN<N> sRGB) requires (N >= 3) {
-    return sRGB.spread<3>(LIFT(FLIP::sRGBToLinearRGB));
+static inline floatN<N> srgb_to_linear_rgb(floatN<N> sRGB) requires (N >= 3) {
+    return sRGB.spread<3>(LIFT(FLIP::srgb_to_linear_rgb));
 }
 
 template<size_t N>
-static inline floatN<N> LinearRGBTosRGB(floatN<N> RGB) requires (N >= 3) {
-    return RGB.spread<3>(LIFT(FLIP::LinearRGBTosRGB));
+static inline floatN<N> linear_rgb_to_srgb(floatN<N> RGB) requires (N >= 3) {
+    return RGB.spread<3>(LIFT(FLIP::linear_rgb_to_srgb));
 }
 
 template<size_t N>
-constexpr static inline floatN<N> LinearRGBToXYZ(const floatN<N>& RGB) requires (N >= 3) {
+constexpr static inline floatN<N> linear_rgb_to_xyz(const floatN<N>& RGB) requires (N >= 3) {
     // Source: https://www.image-engineering.de/library/technotes/958-how-to-convert-between-srgb-and-ciexyz
     // Assumes D65 standard illuminant.
     constexpr float a11 = 10135552.0f / 24577794.0f;
@@ -269,7 +271,7 @@ constexpr static inline floatN<N> LinearRGBToXYZ(const floatN<N>& RGB) requires 
 }
 
 template<size_t N>
-constexpr static inline floatN<N> XYZToLinearRGB(const floatN<N>& XYZ) requires (N >= 3) {
+constexpr static inline floatN<N> xyz_to_linear_rgb(const floatN<N>& XYZ) requires (N >= 3) {
     // Return values in linear RGB, assuming D65 standard illuminant.
     constexpr float a11 = 3.241003275f;
     constexpr float a12 = -1.537398934f;
@@ -288,7 +290,7 @@ constexpr static inline floatN<N> XYZToLinearRGB(const floatN<N>& XYZ) requires 
 }
 
 template<size_t N>
-static inline floatN<N> XYZToCIELab(const floatN<N>& XYZ, const floatN<3>& invReferenceIlluminant = INV_DEFAULT_ILLUMINANT) requires (N >= 3) {
+static inline floatN<N> xyz_to_cielab(const floatN<N>& XYZ, const floatN<3>& invReferenceIlluminant = INV_DEFAULT_ILLUMINANT) requires (N >= 3) {
     constexpr float delta = 6.0f / 29.0f;
     constexpr float deltaSquare = delta * delta;
     constexpr float deltaCube = delta * deltaSquare;
@@ -308,7 +310,7 @@ static inline floatN<N> XYZToCIELab(const floatN<N>& XYZ, const floatN<3>& invRe
 }
 
 template<size_t N>
-constexpr static inline floatN<N> CIELabToXYZ(const floatN<N>& Lab, const floatN<3>& referenceIlluminant = DEFAULT_ILLUMINANT) requires (N >= 3) {
+constexpr static inline floatN<N> cielab_to_xyz(const floatN<N>& Lab, const floatN<3>& referenceIlluminant = DEFAULT_ILLUMINANT) requires (N >= 3) {
     // The default illuminant is D65.
     float Y = (Lab[0] + 16.0f) / 116.0f;
     float X = Lab[1] / 500.0f + Y;
@@ -326,7 +328,7 @@ constexpr static inline floatN<N> CIELabToXYZ(const floatN<N>& Lab, const floatN
 }
 
 template<size_t N>
-constexpr static inline floatN<N> XYZToYCxCz(const floatN<N>& XYZ, const floatN<3>& invReferenceIlluminant = INV_DEFAULT_ILLUMINANT) requires (N >= 3) {
+constexpr static inline floatN<N> xyz_to_ycxcz(const floatN<N>& XYZ, const floatN<3>& invReferenceIlluminant = INV_DEFAULT_ILLUMINANT) requires (N >= 3) {
     // The default illuminant is D65.
     floatN<3> XYZ2 = XYZ;
     XYZ2 *= invReferenceIlluminant;
@@ -337,7 +339,7 @@ constexpr static inline floatN<N> XYZToYCxCz(const floatN<N>& XYZ, const floatN<
 }
 
 template<size_t N>
-constexpr static inline floatN<N> YCxCzToXYZ(const floatN<N>& YCxCz, const floatN<3>& referenceIlluminant = DEFAULT_ILLUMINANT) requires (N >= 3) {
+constexpr static inline floatN<N> ycxycz_to_xyz(const floatN<N>& YCxCz, const floatN<3>& referenceIlluminant = DEFAULT_ILLUMINANT) requires (N >= 3) {
     // The default illuminant is D65.
     const float Y = (YCxCz[0] + 16.0f) / 116.0f;
     const float Cx = YCxCz[1] / 500.0f;
@@ -350,7 +352,7 @@ constexpr static inline floatN<N> YCxCzToXYZ(const floatN<N>& YCxCz, const float
 }
 
 template<size_t N>
-constexpr static inline float YCxCzToGray(const floatN<N>& YCxCz) {
+constexpr static inline float ycxcz_to_grayscale(const floatN<N>& YCxCz) {
     return (YCxCz[0] + 16.0f) / 116.0f; // Make it [0,1].
 }
 

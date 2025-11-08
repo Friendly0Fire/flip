@@ -247,32 +247,32 @@ namespace ImageHelpers
         return bOk;
     }
 
-    bool load(FLIP::image<FLIP::float3>& dstImage, const std::string& fileName)
+    std::optional<FLIP::image<FLIP::float3>> load(const std::string& fileName)
     {
         int imgWidth;
         int imgHeight;
         float* pixels;
         if (loadImage(fileName, imgWidth, imgHeight, pixels))
         {
-            dstImage.setPixels(pixels, imgWidth, imgHeight);
+            FLIP::image<FLIP::float3> dstImage{ std::span(pixels, imgWidth * imgHeight * 3), imgWidth };
             delete[] pixels;
-            return true;
+            return dstImage;
         }
-        return false;
+        return std::nullopt;
     }
 
     bool pngSave(const std::string& filename, FLIP::image<FLIP::float3>& image)
     {
-        unsigned char* pixels = new unsigned char[3 * image.getWidth() * image.getHeight()];
+        unsigned char* pixels = new unsigned char[3 * image.get_width() * image.get_height()];
 
 #ifdef FLIP_ENABLE_CUDA
         image.synchronizeHost();
 #endif
 
 #pragma omp parallel for
-        for (int y = 0; y < image.getHeight(); y++)
+        for (int y = 0; y < image.get_height(); y++)
         {
-            for (int x = 0; x < image.getWidth(); x++)
+            for (int x = 0; x < image.get_width(); x++)
             {
                 int index = image.index(x, y);
                 FLIP::float3 color = image.get(x, y);
@@ -283,7 +283,7 @@ namespace ImageHelpers
             }
         }
 
-        int ok = stbi_write_png(filename.c_str(), image.getWidth(), image.getHeight(), 3, pixels, 3 * image.getWidth());
+        int ok = stbi_write_png(filename.c_str(), image.get_width(), image.get_height(), 3, pixels, 3 * image.get_width());
         delete[] pixels;
 
         return (ok != 0);
@@ -300,12 +300,12 @@ namespace ImageHelpers
         std::vector<float> vImages[channels];
         for (int i = 0; i < channels; ++i)
         {
-            vImages[i].resize(image.getWidth() * image.getHeight());
+            vImages[i].resize(image.get_width() * image.get_height());
         }
         int pixelIndex = 0;
-        for (int y = 0; y < image.getHeight(); y++)
+        for (int y = 0; y < image.get_height(); y++)
         {
-            for (int x = 0; x < image.getWidth(); x++)
+            for (int x = 0; x < image.get_width(); x++)
             {
                 FLIP::float3 p = image.get(x, y);
                 vImages[0][pixelIndex] = p.r();
@@ -339,8 +339,8 @@ namespace ImageHelpers
         InitEXRImage(&exrImage);
         exrImage.num_channels = channels;
         exrImage.images = (unsigned char**)vpImage;
-        exrImage.width = image.getWidth();
-        exrImage.height = image.getHeight();
+        exrImage.width = image.get_width();
+        exrImage.height = image.get_height();
 
         const char* error;
         int ret = SaveEXRImageToFile(&exrImage, &exrHeader, fileName.c_str(), &error);

@@ -55,6 +55,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <format>
 
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX
@@ -99,55 +100,60 @@ namespace FLIPTool
         }
     }
 
-    static void setupPixelsPerDegree(const commandline& commandLine, FLIP::Parameters& parameters)
+    static void setupPixelsPerDegree(const commandline& commandLine, FLIP::parameters& parameters)
     {
         // The default value in parameters.PPD is computed as FLIP::calculatePPD(0.7f, 3840.0f, 0.7f); in FLIP.h.
         if (commandLine.optionSet("pixels-per-degree"))
         {
-            parameters.PPD = std::stof(commandLine.getOptionValue("pixels-per-degree"));
+            parameters.ppd = std::stof(commandLine.getOptionValue("pixels-per-degree"));
         }
         else if (commandLine.optionSet("viewing-conditions"))
         {
             const float monitorDistance = std::stof(commandLine.getOptionValue("viewing-conditions", 0));
             const float monitorWidth = std::stof(commandLine.getOptionValue("viewing-conditions", 1));
             const float monitorResolutionX = std::stof(commandLine.getOptionValue("viewing-conditions", 2));
-            parameters.PPD = FLIP::calculatePPD(monitorDistance, monitorResolutionX, monitorWidth);
+            parameters.ppd = FLIP::calculate_ppd(monitorDistance, monitorResolutionX, monitorWidth);
         }
     }
 
-    static void getExposureParameters(const bool useHDR, const commandline& commandLine, FLIP::Parameters& parameters, bool& returnLDRFLIPImages, bool& returnLDRImages)
+    static void getExposureParameters(const bool useHDR, const commandline& commandLine, FLIP::parameters& parameters, bool& returnLDRFLIPImages, bool& returnLDRImages)
     {
         if (useHDR)
         {
             if (commandLine.optionSet("tone-mapper"))   // The default in FLIP::Parameters.tonemapper is "aces".
             {
                 std::string tonemapper = commandLine.getOptionValue("tone-mapper");
-                std::transform(tonemapper.begin(), tonemapper.end(), tonemapper.begin(), [](unsigned char c) { return std::tolower(c); });
+                std::ranges::transform(tonemapper, tonemapper.begin(), [](unsigned char c) { return std::tolower(c); });
                 if (tonemapper != "aces" && tonemapper != "reinhard" && tonemapper != "hable")
                 {
                     std::cout << "\nError: unknown tonemapper, should be one of \"ACES\", \"Reinhard\", or \"Hable\"\n";
-                    exit(-1);
+                    std::exit(-1);
                 }
-                parameters.tonemapper = tonemapper;
+                if(tonemapper == "aces")
+                    parameters.tonemapper = FLIP::tonemapper::aces;
+                else if(tonemapper == "reinhard")
+                    parameters.tonemapper = FLIP::tonemapper::reinhard;
+                else if(tonemapper == "hable")
+                    parameters.tonemapper = FLIP::tonemapper::hable;
             }
             if (commandLine.optionSet("start-exposure"))
             {
-                parameters.startExposure = std::stof(commandLine.getOptionValue("start-exposure"));
+                parameters.exposure.min = std::stof(commandLine.getOptionValue("start-exposure"));
             }
             if (commandLine.optionSet("stop-exposure"))
             {
-                parameters.stopExposure = std::stof(commandLine.getOptionValue("stop-exposure"));
+                parameters.exposure.max = std::stof(commandLine.getOptionValue("stop-exposure"));
             }
             if (commandLine.optionSet("num-exposures"))
             {
-                parameters.numExposures = atoi(commandLine.getOptionValue("num-exposures").c_str());
+                parameters.num_exposures = atoi(commandLine.getOptionValue("num-exposures").c_str());
             }
             returnLDRFLIPImages = commandLine.optionSet("save-ldrflip");
             returnLDRImages = commandLine.optionSet("save-ldr-images");
         }
     }
 
-    static void saveErrorAndExposureMaps(const bool useHDR, commandline& commandLine, const FLIP::Parameters& parameters, const std::string basename,
+    static void saveErrorAndExposureMaps(const bool useHDR, commandline& commandLine, const FLIP::parameters& parameters, const std::string basename,
         FLIP::image<float>& errorMapFLIP, FLIP::image<float>& maxErrorExposureMap, const std::string& destinationDirectory,
         FLIP::filename& referenceFileName, FLIP::filename& testFileName, FLIP::filename& histogramFileName, FLIP::filename& txtFileName,
         FLIP::filename& flipFileName, FLIP::filename& exposureFileName, const size_t verbosity, const size_t testFileCount)
@@ -162,7 +168,7 @@ namespace FLIPTool
         }
         else
         {
-            flipFileName.setName(referenceFileName.getName() + "." + testFileName.getName() + "." + std::to_string(int(std::round(parameters.PPD))) + "ppd");
+            flipFileName.setName(referenceFileName.getName() + "." + testFileName.getName() + "." + std::to_string(int(std::round(parameters.ppd))) + "ppd");
             if (!useHDR)
             {
                 flipFileName.setName(flipFileName.getName() + ".ldr");  // Note that the HDR filename is not complete until after FLIP has been computed, since FLIP may update the exposure parameters.
@@ -173,17 +179,18 @@ namespace FLIPTool
         {
             if (verbosity > 1 && testFileCount == 0)
             {
-                std::cout << "     Assumed tone mapper: " << ((parameters.tonemapper == "aces") ? "ACES" : (parameters.tonemapper == "hable" ? "Hable" : "Reinhard")) << "\n";
-                std::cout << "     Start exposure: " << FIXED_DECIMAL_DIGITS(parameters.startExposure, 4) << "\n";
-                std::cout << "     Stop exposure: " << FIXED_DECIMAL_DIGITS(parameters.stopExposure, 4) << "\n";
-                std::cout << "     Number of exposures: " << parameters.numExposures << "\n\n";
+                std::cout << "     Assumed tone mapper: " << to_string(parameters.tonemapper) << "\n";
+                std::cout << "     Start exposure: " << FIXED_DECIMAL_DIGITS(parameters.exposure.min, 4) << "\n";
+                std::cout << "     Stop exposure: " << FIXED_DECIMAL_DIGITS(parameters.exposure.max, 4) << "\n";
+                std::cout << "     Number of exposures: " << parameters.num_exposures << "\n\n";
             }
 
-            flipFileName.setName(flipFileName.getName() + ".hdr." + parameters.tonemapper + "." + f2s(parameters.startExposure) + "_to_" + f2s(parameters.stopExposure) + "." + std::to_string(parameters.numExposures));
+            flipFileName.setName(std::format("{}.hdr.{}.{}_to_{}.{}",
+                flipFileName.getName(), to_string(parameters.tonemapper), parameters.exposure.min, parameters.exposure.max, parameters.num_exposures));
             exposureFileName.setName("exposure_map." + flipFileName.getName());
         }
 
-        if (basename != "" && commandLine.getOptionValues("test").size() == 1)
+        if (!basename.empty() && commandLine.getOptionValues("test").size() == 1)
         {
             flipFileName.setName(basename);
             exposureFileName.setName(basename + ".exposure_map");
@@ -199,14 +206,14 @@ namespace FLIPTool
 
         if (!commandLine.optionSet("no-error-map"))
         {
-            FLIP::image<FLIP::float3> pngResult(errorMapFLIP.getWidth(), errorMapFLIP.getHeight());
+            FLIP::image<FLIP::float3> pngResult(errorMapFLIP.get_width(), errorMapFLIP.get_height());
             if (!commandLine.optionSet("no-magma"))
             {
-                pngResult.colorMap(errorMapFLIP, FLIP::magmaMap);
+                pngResult.apply_color_map(errorMapFLIP, FLIP::MagmaMap);
             }
             else
             {
-                pngResult.copyFloatToColor3(errorMapFLIP);
+                pngResult.expand_grayscale(errorMapFLIP);
             }
             ImageHelpers::pngSave(destinationDirectory + "/" + flipFileName.toString(), pngResult);
         }
@@ -215,8 +222,8 @@ namespace FLIPTool
         {
             if (!commandLine.optionSet("no-exposure-map"))
             {
-                FLIP::image<FLIP::float3> pngMaxErrorExposureMap(maxErrorExposureMap.getWidth(), maxErrorExposureMap.getHeight());
-                pngMaxErrorExposureMap.colorMap(maxErrorExposureMap, FLIP::viridisMap);
+                FLIP::image<FLIP::float3> pngMaxErrorExposureMap(maxErrorExposureMap.get_width(), maxErrorExposureMap.get_height());
+                pngMaxErrorExposureMap.apply_color_map(maxErrorExposureMap, FLIP::ViridisMap);
                 ImageHelpers::pngSave(destinationDirectory + "/" + exposureFileName.toString(), pngMaxErrorExposureMap);
             }
         }
@@ -233,7 +240,7 @@ namespace FLIPTool
     }
 
     // Optionally store the intermediate LDR images and LDR-FLIP error maps produced during the evaluation of HDR-FLIP.
-    static void saveIntermediateHDRFLIPOutput(commandline& commandLine, const FLIP::Parameters& parameters, const std::string& basename, const FLIP::filename& flipFileName,
+    static void saveIntermediateHDRFLIPOutput(commandline& commandLine, const FLIP::parameters& parameters, const std::string& basename, const FLIP::filename& flipFileName,
         const FLIP::filename& referenceFileName, const FLIP::filename& testFileName, const std::string& destinationDirectory,
         std::vector<FLIP::image<float>*> intermediateLDRFLIPImages, std::vector<FLIP::image<FLIP::float3>*> intermediateLDRImages)
     {
@@ -241,34 +248,36 @@ namespace FLIPTool
         {
             FLIP::filename rFileName(".png");
             FLIP::filename tFileName(".png");
-            if (intermediateLDRImages.size() != size_t(parameters.numExposures * 2))
+            if (intermediateLDRImages.size() != static_cast<size_t>(parameters.num_exposures * 2))
             {
                 std::cout << "FLIP tool error: the number of LDR images from HDR-FLIP is not the expected number.\nExiting.\n";
-                exit(EXIT_FAILURE);
+                std::exit(EXIT_FAILURE);
             }
 
-            const float exposureStepSize = (parameters.stopExposure - parameters.startExposure) / (parameters.numExposures - 1);
-            for (int i = 0; i < parameters.numExposures; i++)
+            const float exposureStepSize = parameters.exposure.range() / static_cast<float>(parameters.num_exposures - 1);
+            for (int i = 0; i < parameters.num_exposures; i++)
             {
                 std::string expCount, expString;
-                setExposureStrings(i, parameters.startExposure + i * exposureStepSize, expCount, expString);
+                setExposureStrings(i, parameters.exposure.min + i * exposureStepSize, expCount, expString);
 
-                if (basename == "")
+                if (basename.empty())
                 {
-                    rFileName.setName(referenceFileName.getName() + "." + parameters.tonemapper + "." + expCount + "." + expString);
-                    tFileName.setName(testFileName.getName() + "." + parameters.tonemapper + "." + expCount + "." + expString);
+                    rFileName.setName(std::format("{}.{}.{}.{}",
+                        referenceFileName.getName(), parameters.tonemapper, expCount, expString));
+                    tFileName.setName(std::format("{}.{}.{}.{}",
+                        testFileName.getName(), parameters.tonemapper, expCount, expString));
                 }
                 else
                 {
-                    rFileName.setName(basename + ".reference." + "." + expCount);
-                    tFileName.setName(basename + ".test." + "." + expCount);
+                    rFileName.setName(std::format("{}.reference.{}", basename, expCount));
+                    tFileName.setName(std::format("{}.test.{}", basename, expCount));
                 }
                 FLIP::image<FLIP::float3>* rImage = intermediateLDRImages[0];
                 FLIP::image<FLIP::float3>* tImage = intermediateLDRImages[1];
                 intermediateLDRImages.erase(intermediateLDRImages.begin());
                 intermediateLDRImages.erase(intermediateLDRImages.begin());
-                rImage->LinearRGBTosRGB();
-                tImage->LinearRGBTosRGB();
+                rImage->linear_rgb_to_srgb();
+                tImage->linear_rgb_to_srgb();
                 ImageHelpers::pngSave(destinationDirectory + "/" + rFileName.toString(), *rImage);
                 ImageHelpers::pngSave(destinationDirectory + "/" + tFileName.toString(), *tImage);
                 delete rImage;
@@ -277,40 +286,43 @@ namespace FLIPTool
         }
         if (intermediateLDRFLIPImages.size() > 0)
         {
-            if (intermediateLDRFLIPImages.size() != size_t(parameters.numExposures))
+            if (intermediateLDRFLIPImages.size() != size_t(parameters.num_exposures))
             {
                 std::cout << "FLIP tool error: the number of FLIP LDR images from HDR-FLIP is not the expected number.\nExiting.\n";
                 exit(EXIT_FAILURE);
             }
 
-            const float exposureStepSize = (parameters.stopExposure - parameters.startExposure) / (parameters.numExposures - 1);
-            for (int i = 0; i < parameters.numExposures; i++)
+            const float exposureStepSize = parameters.exposure.range() / (parameters.num_exposures - 1);
+            for (int i = 0; i < parameters.num_exposures; i++)
             {
                 std::string expCount, expString;
-                setExposureStrings(i, parameters.startExposure + i * exposureStepSize, expCount, expString);
+                setExposureStrings(i, parameters.exposure.min + i * exposureStepSize, expCount, expString);
 
                 FLIP::image<float>* flipImage = intermediateLDRFLIPImages[0];
                 intermediateLDRFLIPImages.erase(intermediateLDRFLIPImages.begin());
 
-                FLIP::image<FLIP::float3> pngResult(flipImage->getWidth(), flipImage->getHeight());
+                FLIP::image<FLIP::float3> pngResult(flipImage->get_width(), flipImage->get_height());
 
                 if (!commandLine.optionSet("no-magma"))
                 {
-                    pngResult.colorMap(*flipImage, FLIP::magmaMap);
+                    pngResult.apply_color_map(*flipImage, FLIP::MagmaMap);
                 }
                 else
                 {
-                    pngResult.copyFloatToColor3(*flipImage);
+                    pngResult.expand_grayscale(*flipImage);
                 }
-                if (basename == "")
+                if (basename.empty())
                 {
-                    ImageHelpers::pngSave(destinationDirectory + "/" + "flip." + referenceFileName.getName() + "." + testFileName.getName() + "." + std::to_string(int(std::round(parameters.PPD))) + "ppd.ldr." + parameters.tonemapper + "." + expCount + "." + expString + ".png", pngResult);
+                    ImageHelpers::pngSave(std::format("{}/flip.{}.{}.{}ppd.ldr.{}.{}.{}.png",
+                        destinationDirectory, referenceFileName.getName(), testFileName.getName(), static_cast<int>(std::round(parameters.ppd)), parameters.tonemapper, expCount, expString), pngResult);
                 }
                 else
                 {
-                    ImageHelpers::pngSave(destinationDirectory + "/" + basename + "." + expCount + ".png", pngResult);
+                    ImageHelpers::pngSave(std::format("{}/{}.{}.png",
+                        destinationDirectory, basename, expCount), pngResult);
                 }
-                ImageHelpers::pngSave(destinationDirectory + "/" + flipFileName.toString(), pngResult);
+                ImageHelpers::pngSave(std::format("{}/{}",
+                    destinationDirectory, flipFileName.toString()), pngResult);
                 delete flipImage;
             }
         }
@@ -321,9 +333,9 @@ namespace FLIPTool
         const FLIP::filename& txtFileName, const FLIP::filename& flipFileName, const FLIP::filename& exposureFileName, const std::string& FLIPString, const float time,
         const uint32_t testFileCount, const bool saveOverlappedHistogram, const bool useHDR, const size_t verbosity)
     {
-        for (int y = 0; y < errorMapFLIP.getHeight(); y++)
+        for (int y = 0; y < errorMapFLIP.get_height(); y++)
         {
-            for (int x = 0; x < errorMapFLIP.getWidth(); x++)
+            for (int x = 0; x < errorMapFLIP.get_width(); x++)
             {
                 pooledValues.update(x, y, errorMapFLIP.get(x, y));
             }
@@ -334,7 +346,7 @@ namespace FLIPTool
             bool optionLog = commandLine.optionSet("log");
             bool optionExcludeValues = commandLine.optionSet("exclude-pooled-values");
             float yMax = (commandLine.optionSet("y-max") ? std::stof(commandLine.getOptionValue("y-max")) : 0.0f);
-            pooledValues.save(destinationDirectory + "/" + histogramFileName.toString(), errorMapFLIP.getWidth(), errorMapFLIP.getHeight(), optionLog, !optionExcludeValues, yMax);
+            pooledValues.save(destinationDirectory + "/" + histogramFileName.toString(), errorMapFLIP.get_width(), errorMapFLIP.get_height(), optionLog, !optionExcludeValues, yMax);
         }
 
         // Collect pooled values and elapsed time.
@@ -516,7 +528,7 @@ namespace FLIPTool
 
         size_t verbosity = commandLine.optionSet("verbosity") ? std::stoi(commandLine.getOptionValue("verbosity")) : 2;
 
-        FLIP::Parameters parameters;
+        FLIP::parameters parameters;
         FLIP::filename referenceFileName(commandLine.getOptionValue("reference"));
         bool bUseHDR = (referenceFileName.getExtension() == "exr");
         std::string destinationDirectory = ".";
@@ -536,20 +548,20 @@ namespace FLIPTool
         if (verbosity > 1)
         {
             std::cout << "Invoking " << (bUseHDR ? "HDR" : "LDR") << "-FLIP\n";
-            std::cout << "     Pixels per degree: " << int(std::round(parameters.PPD)) << "\n" << (!bUseHDR ? "\n" : "");
+            std::cout << "     Pixels per degree: " << int(std::round(parameters.ppd)) << "\n" << (!bUseHDR ? "\n" : "");
         }
 
-        FLIP::image<FLIP::float3> referenceImage;
-        bool refImageOk = ImageHelpers::load(referenceImage, referenceFileName.toString());   // Load reference image.
-        if (!refImageOk)
+        auto referenceImageOpt = ImageHelpers::load(referenceFileName.toString());   // Load reference image.
+        if (!referenceImageOpt)
         {
             std::cout << "Error: could not read reference image file <" << referenceFileName.toString() << ">. Note that FLIP only loads png, bmp, tga, and exr images. Exiting.\n";
             exit(EXIT_FAILURE);
         }
+        auto& referenceImage = *referenceImageOpt;
 
         if (!bUseHDR)
         {
-            referenceImage.sRGBToLinearRGB();
+            referenceImage.srgb_to_linear_rgb();
         }
 
         // Save firstTestFileName and firstPooledValue for optional overlapped histogram.
@@ -573,26 +585,26 @@ namespace FLIPTool
                 exit(EXIT_FAILURE);
             }
             
-            FLIP::image<FLIP::float3> testImage;
-            bool testImageOk = ImageHelpers::load(testImage, testFileName.toString());     // Load test image.
-            if (!testImageOk)
+            auto testImageOpt = ImageHelpers::load(testFileName.toString());     // Load test image.
+            if (!testImageOpt)
             {
                 std::cout << "Error: could not read test file <" << testFileName.toString() << ">. Note that FLIP only loads png, bmp, tga, and exr images. Exiting.\n";
                 exit(EXIT_FAILURE);
             }
-            if (referenceImage.getWidth() != testImage.getWidth() || referenceImage.getHeight() != testImage.getHeight())
+            auto& testImage = *testImageOpt;
+            if (referenceImage.get_width() != testImage.get_width() || referenceImage.get_height() != testImage.get_height())
             {
-                std::cout << "Error: reference <" << referenceImage.getWidth() << "x" << referenceImage.getHeight() << "> and test <" << testImage.getWidth() << "x" << testImage.getHeight() << "> images must be of equal dimensions. Exiting.\n";
+                std::cout << "Error: reference <" << referenceImage.get_width() << "x" << referenceImage.get_height() << "> and test <" << testImage.get_width() << "x" << testImage.get_height() << "> images must be of equal dimensions. Exiting.\n";
                 exit(EXIT_FAILURE);
             }
 
             if (!bUseHDR)
             {
-                testImage.sRGBToLinearRGB();
+                testImage.srgb_to_linear_rgb();
             }
 
-            FLIP::image<float> errorMapFLIP(referenceImage.getWidth(), referenceImage.getHeight(), 0.0f);
-            FLIP::image<float> maxErrorExposureMap(referenceImage.getWidth(), referenceImage.getHeight());
+            FLIP::image<float> errorMapFLIP(referenceImage.get_width(), referenceImage.get_height(), 0.0f);
+            FLIP::image<float> maxErrorExposureMap(referenceImage.get_width(), referenceImage.get_height());
 
             auto t0 = std::chrono::high_resolution_clock::now();
             FLIP::evaluate(referenceImage, testImage, bUseHDR, parameters, errorMapFLIP, maxErrorExposureMap, returnLDRFLIPImages, intermediateLDRFLIPImages, returnLDRImages, intermediateLDRImages);
@@ -615,7 +627,7 @@ namespace FLIPTool
             bool optionLog = commandLine.optionSet("log");
             bool optionExcludeValues = commandLine.optionSet("exclude-pooled-values");
             float yMax = (commandLine.optionSet("y-max") ? std::stof(commandLine.getOptionValue("y-max")) : 0.0f);
-            pooledValues.saveOverlappedHistogram(firstPooledValues, destinationDirectory + "/" + histogramFileName.toString(), referenceImage.getWidth(), referenceImage.getHeight(), optionLog, referenceFileName.getName(), firstTestFileName.getName(), testFileName.getName(), !optionExcludeValues, yMax);
+            pooledValues.saveOverlappedHistogram(firstPooledValues, destinationDirectory + "/" + histogramFileName.toString(), referenceImage.get_width(), referenceImage.get_height(), optionLog, referenceFileName.getName(), firstTestFileName.getName(), testFileName.getName(), !optionExcludeValues, yMax);
         }
 
         float timeTotal = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - timeStart).count() / 1000000.0f;

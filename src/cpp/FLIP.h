@@ -93,16 +93,15 @@
 
 namespace FLIP {
 
-struct Parameters {
-    Parameters() = default;
-    float PPD = calculatePPD(0.7f, 3840.0f, 0.7f);            // Populate PPD with default values based on 0.7 meters = distance to screen, 3840 pixels screen width, 0.7 meters monitor width.
-    float startExposure = std::numeric_limits<float>::infinity();   // Used when the input is HDR.
-    float stopExposure = std::numeric_limits<float>::infinity();    // Used when the input is HDR.
-    int numExposures = -1;                                          // Used when the input is HDR.
-    std::string tonemapper = "aces";                                // Default tonemapper (used for HDR).
+struct parameters {
+    parameters() = default;
+    float ppd = calculate_ppd(0.7f, 3840.0f, 0.7f);            // Populate PPD with default values based on 0.7 meters = distance to screen, 3840 pixels screen width, 0.7 meters monitor width.
+    exposure_range exposure;
+    int num_exposures = -1;                                          // Used when the input is HDR.
+    tonemapper tonemapper = tonemapper::aces;                                // Default tonemapper (used for HDR).
 };
 
-static constexpr struct xFLIPConstants {
+static constexpr struct FLIP_constants {
     float gqc = 0.7f;
     float gpc = 0.4f;
     float gpt = 0.95f;
@@ -110,29 +109,29 @@ static constexpr struct xFLIPConstants {
     float gqf = 0.5f;
 } FLIPConstants;
 
-constexpr inline float Hunt(const float luminance, const float chrominance) {
+constexpr inline float hunt(const float luminance, const float chrominance) {
     return 0.01f * luminance * chrominance;
 }
 
 template<size_t N>
-inline float HyAB(const floatN<N>& refPixel, const floatN<N>& testPixel) {
+inline float hy_ab(const floatN<N>& refPixel, const floatN<N>& testPixel) {
     float cityBlockDistanceL = std::fabs(refPixel[0] - testPixel[0]);
     float euclideanDistanceAB = std::sqrt(square(refPixel[1] - testPixel[1]) + square(refPixel[2] - testPixel[2]));
     return cityBlockDistanceL + euclideanDistanceAB;
 }
 
-inline float computeMaxDistance(float gqc) {
-    static const floatN greenLab = XYZToCIELab(LinearRGBToXYZ(floatN<3>(0.0f, 1.0f, 0.0f)));
-    static const floatN blueLab = XYZToCIELab(LinearRGBToXYZ(floatN<3>(0.0f, 0.0f, 1.0f)));
-    static const floatN greenLabHunt = floatN<3>(greenLab[0], Hunt(greenLab[0], greenLab[1]), Hunt(greenLab[0], greenLab[2]));
-    static const floatN blueLabHunt = floatN<3>(blueLab[0], Hunt(blueLab[0], blueLab[1]), Hunt(blueLab[0], blueLab[2]));
-    return std::pow(HyAB(greenLabHunt, blueLabHunt), gqc);
+inline float max_distance(float gqc) {
+    static const floatN greenLab = xyz_to_cielab(linear_rgb_to_xyz(floatN<3>(0.0f, 1.0f, 0.0f)));
+    static const floatN blueLab = xyz_to_cielab(linear_rgb_to_xyz(floatN<3>(0.0f, 0.0f, 1.0f)));
+    static const floatN greenLabHunt = floatN<3>(greenLab[0], hunt(greenLab[0], greenLab[1]), hunt(greenLab[0], greenLab[2]));
+    static const floatN blueLabHunt = floatN<3>(blueLab[0], hunt(blueLab[0], blueLab[1]), hunt(blueLab[0], blueLab[2]));
+    return std::pow(hy_ab(greenLabHunt, blueLabHunt), gqc);
 }
 
 template<typename T>
 class image : public tensor<T> {
 public:
-    image() { }
+    image() = default;
 
     image(const int width, const int height)
         : tensor<T>(width, height, 1) { }
@@ -146,45 +145,54 @@ public:
     image(const int3 dim)
         : tensor<T>(dim.x(), dim.y(), 1) { }
 
-    image(image& image) {
-        this->init(image.mDim);
+    image(const image& image) {
+        this->init(image.dims_);
         this->copy(image);
     }
 
-    image(tensor<T>& tensor, const int offset) {
-        this->init(tensor.getDimensions());
+    image(const tensor<T>& tensor, const int offset) {
+        this->init(tensor.get_dimensions());
         this->copy(tensor, offset);
     }
 
-    image(const float3* pColorMap, int size)
-        : tensor<T>(pColorMap, size) { }
+    image(std::span<const T> input)
+        : tensor<T>(input) { }
+
+    image(std::span<const T> input, int width)
+        : tensor<T>(input, width) { }
+
+    image(std::span<const float> input) requires (!std::same_as<T, float>)
+        : tensor<T>(input) { }
+
+    image(std::span<const float> input, int width) requires (!std::same_as<T, float>)
+        : tensor<T>(input, width) { }
 
     T get(int x, int y) const {
-        return this->mvpHostData[this->index(x, y)];
+        return this->data_[this->index(x, y)];
     }
 
-    void set(int x, int y, T value) {
-        this->mvpHostData[this->index(x, y)] = value;
+    void set(int x, int y, const T& value) {
+        this->data_[this->index(x, y)] = value;
     }
 
     // For details, see separatedConvolutions.pdf in the FLIP repository:
     // https://github.com/NVlabs/flip/blob/main/misc/separatedConvolutions.pdf.
-    static void setSpatialFilters(image<float3>& filterYCx, image<float3>& filterCz, float ppd, int filterRadius) {
+    static void set_spatial_filters(image<float3>& filterYCx, image<float3>& filterCz, float ppd, int filterRadius) {
         float deltaX = 1.0f / ppd;
         float3 filterSumYCx = { 0.0f, 0.0f, 0.0f };
         float3 filterSumCz = { 0.0f, 0.0f, 0.0f };
         int filterWidth = 2 * filterRadius + 1;
 
         for(int x = 0; x < filterWidth; x++) {
-            float ix = (x - filterRadius) * deltaX;
+            const float ix = (static_cast<float>(x) - filterRadius) * deltaX;
 
-            float ix2 = ix * ix;
-            float gY = Gaussian(ix2, GaussianConstants.a1.x(), GaussianConstants.b1.x());
-            float gCx = Gaussian(ix2, GaussianConstants.a1.y(), GaussianConstants.b1.y());
-            float gCz1 = GaussianSqrt(ix2, GaussianConstants.a1.z(), GaussianConstants.b1.z());
-            float gCz2 = GaussianSqrt(ix2, GaussianConstants.a2.z(), GaussianConstants.b2.z());
-            float3 valueYCx = float3(gY, gCx, 0.0f);
-            float3 valueCz = float3(gCz1, gCz2, 0.0f);
+            const float ix2 = ix * ix;
+            const float gY = Gaussian(ix2, GaussianConstants.a1.x(), GaussianConstants.b1.x());
+            const float gCx = Gaussian(ix2, GaussianConstants.a1.y(), GaussianConstants.b1.y());
+            const float gCz1 = GaussianSqrt(ix2, GaussianConstants.a1.z(), GaussianConstants.b1.z());
+            const float gCz2 = GaussianSqrt(ix2, GaussianConstants.a2.z(), GaussianConstants.b2.z());
+            const float3 valueYCx(gY, gCx, 0.0f);
+            const float3 valueCz(gCz1, gCz2, 0.0f);
             filterYCx.set(x, 0, valueYCx);
             filterCz.set(x, 0, valueCz);
             filterSumYCx += valueYCx;
@@ -192,11 +200,11 @@ public:
         }
 
         // Normalize weights.
-        float3 normFactorYCx = { 1.0f / filterSumYCx.x(), 1.0f / filterSumYCx.y(), 1.0f };
-        float normFactorCz = 1.0f / std::sqrt(filterSumCz.x() * filterSumCz.x() + filterSumCz.y() * filterSumCz.y());
+        const float3 normFactorYCx = { 1.0f / filterSumYCx.x(), 1.0f / filterSumYCx.y(), 1.0f };
+        const float normFactorCz = 1.0f / std::sqrt(filterSumCz.x() * filterSumCz.x() + filterSumCz.y() * filterSumCz.y());
         for(int x = 0; x < filterWidth; x++) {
-            float3 pYCx = filterYCx.get(x, 0);
-            float3 pCz = filterCz.get(x, 0);
+            const float3 pYCx = filterYCx.get(x, 0);
+            const float3 pCz = filterCz.get(x, 0);
 
             filterYCx.set(x, 0, float3(pYCx.x() * normFactorYCx.x(), pYCx.y() * normFactorYCx.y(), 0.0f));
             filterCz.set(x, 0, float3(pCz.x() * normFactorCz, pCz.y() * normFactorCz, 0.0f));
@@ -205,9 +213,9 @@ public:
 
     // For details, see separatedConvolutions.pdf in the FLIP repository:
     // https://github.com/NVlabs/flip/blob/main/misc/separatedConvolutions.pdf
-    static void setFeatureFilter(image<float3>& filter, const float ppd) {
+    static void set_feature_filter(image<float3>& filter, const float ppd) {
         const float stdDev = 0.5f * FLIPConstants.gw * ppd;
-        const int radius = int(std::ceil(3.0f * stdDev));
+        const int radius = static_cast<int>(std::ceil(3.0f * stdDev));
         const int width = 2 * radius + 1;
 
         float gSum = 0.0f;
@@ -217,20 +225,20 @@ public:
         float ddgSumPositive = 0.0f;
 
         for(int x = 0; x < width; x++) {
-            int xx = x - radius;
+            const int xx = x - radius;
 
-            float g = Gaussian(float(xx), stdDev);
+            const float g = Gaussian(static_cast<float>(xx), stdDev);
             gSum += g;
 
             // 1st derivative.
-            float dg = -float(xx) * g;
+            const float dg = -static_cast<float>(xx) * g;
             if(dg > 0.0f)
                 dgSumPositive += dg;
             else
                 dgSumNegative -= dg;
 
             // 2nd derivative.
-            float ddg = (float(xx) * float(xx) / (stdDev * stdDev) - 1.0f) * g;
+            const float ddg = (static_cast<float>(xx) * static_cast<float>(xx) / (stdDev * stdDev) - 1.0f) * g;
             if(ddg > 0.0f)
                 ddgSumPositive += ddg;
             else
@@ -239,7 +247,7 @@ public:
             filter.set(x, 0, float3(g, dg, ddg));
         }
 
-        // Normalize weights (Gaussian weights should sum to 1; postive and negative weights of 1st and 2nd derivative should sum to 1 and -1, respectively).
+        // Normalize weights (Gaussian weights should sum to 1; positive and negative weights of 1st and 2nd derivative should sum to 1 and -1, respectively).
         for(int x = 0; x < width; x++) {
             float3 p = filter.get(x, 0);
 
@@ -251,15 +259,15 @@ public:
     // Filtering has been changed to separable filtering for better performance. For details on the convolution, see separatedConvolutions.pdf in the FLIP repository:
     // https://github.com/NVlabs/flip/blob/main/misc/separatedConvolutions.pdf
     // After filtering, compute color differences. referenceImage and testImage are expected to be in YCxCz space.
-    void computeColorDifference(const image<float3>& referenceImage, const image<float3>& testImage, const image<float3>& filterYCx, const image<float3>& filterCz) {
+    void color_difference(const image<float3>& referenceImage, const image<float3>& testImage, const image<float3>& filterYCx, const image<float3>& filterCz) {
         // Color difference constants
-        const float cmax = computeMaxDistance(FLIPConstants.gqc);
+        const float cmax = max_distance(FLIPConstants.gqc);
         const float pccmax = FLIPConstants.gpc * cmax;
 
-        const int halfFilterWidth = filterYCx.getWidth() / 2; // YCx and Cz filters are the same size.
+        const int halfFilterWidth = filterYCx.get_width() / 2; // YCx and Cz filters are the same size.
 
-        const int w = referenceImage.getWidth();
-        const int h = referenceImage.getHeight();
+        const int w = referenceImage.get_width();
+        const int h = referenceImage.get_height();
 
         image<float3> intermediateYCxImageReference(w, h);
         image<float3> intermediateYCxImageTest(w, h);
@@ -276,7 +284,7 @@ public:
                 float3 intermediateCzTest = { 0.0f, 0.0f, 0.0f };
 
                 for(int ix = -halfFilterWidth; ix <= halfFilterWidth; ix++) {
-                    int xx = std::min(std::max(0, x + ix), w - 1);
+                    const int xx = std::min(std::max(0, x + ix), w - 1);
 
                     const float3 weightsYCx = filterYCx.get(ix + halfFilterWidth, 0);
                     const float3 weightsCz = filterCz.get(ix + halfFilterWidth, 0);
@@ -306,7 +314,7 @@ public:
                 float3 filteredCzTest = { 0.0f, 0.0f, 0.0f };
 
                 for(int iy = -halfFilterWidth; iy <= halfFilterWidth; iy++) {
-                    int yy = std::min(std::max(0, y + iy), h - 1);
+                    const int yy = std::min(std::max(0, y + iy), h - 1);
 
                     const float3 weightsYCx = filterYCx.get(iy + halfFilterWidth, 0);
                     const float3 weightsCz = filterCz.get(iy + halfFilterWidth, 0);
@@ -324,20 +332,20 @@ public:
                 // Clamp to [0,1] in linear RGB.
                 float3 filteredYCxCzReference = float3(filteredYCxReference.x(), filteredYCxReference.y(), filteredCzReference.x() + filteredCzReference.y());
                 float3 filteredYCxCzTest = float3(filteredYCxTest.x(), filteredYCxTest.y(), filteredCzTest.x() + filteredCzTest.y());
-                filteredYCxCzReference = float3::clamp(XYZToLinearRGB(YCxCzToXYZ(filteredYCxCzReference)));
-                filteredYCxCzTest = float3::clamp(XYZToLinearRGB(YCxCzToXYZ(filteredYCxCzTest)));
+                filteredYCxCzReference = xyz_to_linear_rgb(ycxycz_to_xyz(filteredYCxCzReference)).clamp();
+                filteredYCxCzTest = xyz_to_linear_rgb(ycxycz_to_xyz(filteredYCxCzTest)).clamp();
 
                 // Move from linear RGB to CIELab.
-                filteredYCxCzReference = XYZToCIELab(LinearRGBToXYZ(filteredYCxCzReference));
-                filteredYCxCzTest = XYZToCIELab(LinearRGBToXYZ(filteredYCxCzTest));
+                filteredYCxCzReference = xyz_to_cielab(linear_rgb_to_xyz(filteredYCxCzReference));
+                filteredYCxCzTest = xyz_to_cielab(linear_rgb_to_xyz(filteredYCxCzTest));
 
                 // Apply Hunt adjustment.
-                filteredYCxCzReference.y() = Hunt(filteredYCxCzReference.x(), filteredYCxCzReference.y());
-                filteredYCxCzReference.z() = Hunt(filteredYCxCzReference.x(), filteredYCxCzReference.z());
-                filteredYCxCzTest.y() = Hunt(filteredYCxCzTest.x(), filteredYCxCzTest.y());
-                filteredYCxCzTest.z() = Hunt(filteredYCxCzTest.x(), filteredYCxCzTest.z());
+                filteredYCxCzReference.y() = hunt(filteredYCxCzReference.x(), filteredYCxCzReference.y());
+                filteredYCxCzReference.z() = hunt(filteredYCxCzReference.x(), filteredYCxCzReference.z());
+                filteredYCxCzTest.y() = hunt(filteredYCxCzTest.x(), filteredYCxCzTest.y());
+                filteredYCxCzTest.z() = hunt(filteredYCxCzTest.x(), filteredYCxCzTest.z());
 
-                float colorDifference = HyAB(filteredYCxCzReference, filteredYCxCzTest);
+                float colorDifference = hy_ab(filteredYCxCzReference, filteredYCxCzTest);
 
                 colorDifference = powf(colorDifference, FLIPConstants.gqc);
 
@@ -355,11 +363,11 @@ public:
 
     // This includes convolution (using separable filtering) of grayRefImage and grayTestImage for both edge and point filtering.
     // In addition, it computes the final FLIP error and stores in "this". referenceImage and testImage are expected to be in YCxCz space.
-    void computeFeatureDifferenceAndFinalError(const image<float3>& referenceImage, const image<float3>& testImage, const image<float3>& featureFilter) {
-        const float normalizationFactor = 1.0f / std::sqrt(2.0f);
-        const int halfFilterWidth = featureFilter.getWidth() / 2;      // The edge and point filters are of the same size.
-        const int w = referenceImage.getWidth();
-        const int h = referenceImage.getHeight();
+    void feature_difference_and_final_error(const image<float3>& referenceImage, const image<float3>& testImage, const image<float3>& featureFilter) {
+        constexpr float normalizationFactor = 1.0f / std::numbers::sqrt2_v<float>;
+        const int halfFilterWidth = featureFilter.get_width() / 2;      // The edge and point filters are of the same size.
+        const int w = referenceImage.get_width();
+        const int h = referenceImage.get_height();
 
         image<float3> intermediateFeaturesImageReference(w, h);
         image<float3> intermediateFeaturesImageTest(w, h);
@@ -368,8 +376,8 @@ public:
         // For details, see separatedConvolutions.pdf in the FLIP repository:
         // https://github.com/NVlabs/flip/blob/main/misc/separatedConvolutions.pdf
         // We filter both reference and test image simultaneously (for better performance).
-        const float oneOver116 = 1.0f / 116.0f;
-        const float sixteenOver116 = 16.0f / 116.0f;
+        constexpr float oneOver116 = 1.0f / 116.0f;
+        constexpr float sixteenOver116 = 16.0f / 116.0f;
     #pragma omp parallel for
         for(int y = 0; y < h; y++) {
             for(int x = 0; x < w; x++) {
@@ -377,15 +385,15 @@ public:
                 float gaussianFilteredReference = 0.0f, gaussianFilteredTest = 0.0f;
 
                 for(int ix = -halfFilterWidth; ix <= halfFilterWidth; ix++) {
-                    int xx = std::min(std::max(0, x + ix), w - 1);
+                    const int xx = std::min(std::max(0, x + ix), w - 1);
 
                     const float3 featureWeights = featureFilter.get(ix + halfFilterWidth, 0);
-                    float yReference = referenceImage.get(xx, y).x();
-                    float yTest = testImage.get(xx, y).x();
+                    const float yReference = referenceImage.get(xx, y).x();
+                    const float yTest = testImage.get(xx, y).x();
 
                     // Normalize the Y values to [0,1].
-                    float yReferenceNormalized = yReference * oneOver116 + sixteenOver116;
-                    float yTestNormalized = yTest * oneOver116 + sixteenOver116;
+                    const float yReferenceNormalized = yReference * oneOver116 + sixteenOver116;
+                    const float yTestNormalized = yTest * oneOver116 + sixteenOver116;
 
                     // Image multiplied by 1st and 2nd x-derivatives of Gaussian.
                     dxReference += featureWeights.y() * yReferenceNormalized;
@@ -413,7 +421,7 @@ public:
                 float dyReference = 0.0f, dyTest = 0.0f, ddyReference = 0.0f, ddyTest = 0.0f;
 
                 for(int iy = -halfFilterWidth; iy <= halfFilterWidth; iy++) {
-                    int yy = std::min(std::max(0, y + iy), h - 1);
+                    const int yy = std::min(std::max(0, y + iy), h - 1);
 
                     const float3 featureWeights = featureFilter.get(iy + halfFilterWidth, 0);
                     const float3 intermediateFeaturesReference = intermediateFeaturesImageReference.get(x, yy);
@@ -450,12 +458,12 @@ public:
         }
     }
 
-    void setMaxExposure(image<float>& errorMap, image<float>& exposureMap, float exposure) {
+    void set_max_exposure(image<float>& errorMap, image<float>& exposureMap, float exposure) {
     #pragma omp parallel for
-        for(int y = 0; y < this->getHeight(); y++) {
-            for(int x = 0; x < this->getWidth(); x++) {
-                float srcValue = errorMap.get(x, y);
-                float dstValue = this->get(x, y);
+        for(int y = 0; y < this->get_height(); y++) {
+            for(int x = 0; x < this->get_width(); x++) {
+                const float srcValue = errorMap.get(x, y);
+                const float dstValue = this->get(x, y);
 
                 if(srcValue > dstValue) {
                     exposureMap.set(x, y, exposure);
@@ -468,38 +476,31 @@ public:
     void expose(float level) {
         const float m = std::pow(2.0f, level);
     #pragma omp parallel for
-        for(int y = 0; y < this->getHeight(); y++) {
-            for(int x = 0; x < this->getWidth(); x++) {
+        for(int y = 0; y < this->get_height(); y++) {
+            for(int x = 0; x < this->get_width(); x++) {
                 this->set(x, y, this->get(x, y) * m);
             }
         }
     }
 
-    void computeExposures(const std::string& tm, float& startExposure, float& stopExposure) {
-        int toneMapper = 1;
-        if(tm == "reinhard")
-            toneMapper = 0;
-        if(tm == "aces")
-            toneMapper = 1;
-        if(tm == "hable")
-            toneMapper = 2;
-
-        const float* tc = ToneMappingCoefficients[toneMapper];
-        float t = 0.85f;
-        float a = tc[0] - t * tc[3];
-        float b = tc[1] - t * tc[4];
-        float c = tc[2] - t * tc[5];
+    exposure_range get_exposure_range(tonemapper toneMapper) {
+        const float* tc = ToneMappingCoefficients[std::to_underlying(toneMapper)];
+        constexpr float t = 0.85f;
+        const float a = tc[0] - t * tc[3];
+        const float b = tc[1] - t * tc[4];
+        const float c = tc[2] - t * tc[5];
 
         float xMin = 0.0f;
         float xMax = 0.0f;
-        solveSecondDegree(xMin, xMax, a, b, c);
+        solve_second_degree(xMin, xMax, a, b, c);
 
         float Ymin = 1e30f;
         float Ymax = -1e30f;
         std::vector<float> luminances;
-        for(int y = 0; y < this->mDim.y(); y++) {
-            for(int x = 0; x < this->mDim.x(); x++) {
-                float luminance = linearRGBToLuminance(this->get(x, y));
+        luminances.reserve(this->dims_.x() * this->dims_.y());
+        for(int y = 0; y < this->dims_.y(); y++) {
+            for(int x = 0; x < this->dims_.x(); x++) {
+                float luminance = linear_rgb_to_luminance(this->get(x, y));
                 luminances.push_back(luminance);
                 if(luminance != 0.0f) {
                     Ymin = std::min(luminance, Ymin);
@@ -508,20 +509,19 @@ public:
             }
         }
 
-        size_t medianLocation = luminances.size() / 2;
-        std::nth_element(luminances.begin(), luminances.begin() + medianLocation, luminances.end());
+        const auto medianLocation = static_cast<std::ptrdiff_t>(luminances.size() / 2);
+        std::ranges::nth_element(luminances, luminances.begin() + medianLocation);
         float Ymedian = luminances[medianLocation];
         Ymedian = std::max(Ymedian, std::numeric_limits<float>::epsilon()); // Avoid median = 0 when more than half of the image's pixels are black.
 
-        startExposure = log2(xMax / Ymax);
-        stopExposure = log2(xMax / Ymedian);
+        return { .min = log2(xMax / Ymax), .max = log2(xMax / Ymedian) };
     }
 
-    void LDR_FLIP(image<float3>& reference, image<float3>& test, float ppd)     // Both reference and test are assumed to be in linear RGB.
+    void FLIP_ldr(image<float3>& reference, image<float3>& test, float ppd)     // Both reference and test are assumed to be in linear RGB.
     {
         // Transform from linear RGB to YCxCz.
-        reference.LinearRGBToYCxCz();
-        test.LinearRGBToYCxCz();
+        reference.linear_rgb_to_ycxcz();
+        test.linear_rgb_to_ycxcz();
 
         // Prepare separated spatial filters. Because the filter for the Blue-Yellow channel is a sum of two Gaussians, we need to separate the spatial filter into two
         // (YCx for the Achromatic and Red-Green channels and Cz for the Blue-Yellow channel).
@@ -529,27 +529,27 @@ public:
         int spatialFilterWidth = 2 * spatialFilterRadius + 1;
         image<float3> spatialFilterYCx(spatialFilterWidth, 1);
         image<float3> spatialFilterCz(spatialFilterWidth, 1);
-        setSpatialFilters(spatialFilterYCx, spatialFilterCz, ppd, spatialFilterRadius);
+        set_spatial_filters(spatialFilterYCx, spatialFilterCz, ppd, spatialFilterRadius);
 
         // The next call performs spatial filtering on both the reference and test image at the same time (for better performance).
         // It then computes the color difference between the images. "this" is an image<float> here, so we store the color difference in that image.
-        this->computeColorDifference(reference, test, spatialFilterYCx, spatialFilterCz);
+        this->color_difference(reference, test, spatialFilterYCx, spatialFilterCz);
 
         // Prepare separated feature (edge/point) detection filters.
         const float stdDev = 0.5f * FLIPConstants.gw * ppd;
         const int featureFilterRadius = int(std::ceil(3.0f * stdDev));
         int featureFilterWidth = 2 * featureFilterRadius + 1;
         image<float3> featureFilter(featureFilterWidth, 1);
-        setFeatureFilter(featureFilter, ppd);
+        set_feature_filter(featureFilter, ppd);
 
         // The following call convolves referenceImage and testImage with the edge and point detection filters and performs additional
         // computations for the final feature differences, and then computes the final FLIP error and stores in "this".
-        this->computeFeatureDifferenceAndFinalError(reference, test, featureFilter);
+        this->feature_difference_and_final_error(reference, test, featureFilter);
     }
 };
 
-static image<float3> magmaMap = image<float3>(MapMagma, 256);
-static image<float3> viridisMap = image<float3>(MapViridis, 256);
+static const image<float3> MagmaMap{ MapMagma };
+static const image<float3> ViridisMap{ MapViridis };
 
 /** Main function for computing (the image metric called) FLIP between a reference image and a test image.
  *  See FLIP-tool.cpp for usage of this function.
@@ -568,11 +568,11 @@ static image<float3> viridisMap = image<float3>(MapViridis, 256);
  * @param[out] intermediateLDRImages A list of temporary tonemapped output LDR images (in linear RGB) from HDR-FLIP. Images in this order: Ref0, Test0, Ref1, Test1,...
  */
 static void evaluate(image<float3>& referenceImageInput, image<float3>& testImageInput,
-    const bool useHDR, Parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput,
+    const bool useHDR, parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput,
     const bool returnIntermediateLDRFLIPImages, std::vector<image<float>*>& intermediateLDRFLIPImages,
     const bool returnIntermediateLDRImages, std::vector<image<float3>*>& intermediateLDRImages) {
-    image<float3> referenceImage(referenceImageInput.getWidth(), referenceImageInput.getHeight());
-    image<float3> testImage(referenceImageInput.getWidth(), referenceImageInput.getHeight());
+    image<float3> referenceImage(referenceImageInput.get_width(), referenceImageInput.get_height());
+    image<float3> testImage(referenceImageInput.get_width(), referenceImageInput.get_height());
     referenceImage.copy(referenceImageInput);               // Make a copy, since image::LDR_FLIP() destroys the input images.
     testImage.copy(testImageInput);
 
@@ -580,73 +580,68 @@ static void evaluate(image<float3>& referenceImageInput, image<float3>& testImag
     {
         // If startExposure/stopExposure are inf, they have not been set by the user. If so, compute from referenceImage.
         // See our paper about HDR-FLIP about the details.
-        if(parameters.startExposure == std::numeric_limits<float>::infinity() || parameters.stopExposure == std::numeric_limits<float>::infinity()) {
-            float startExp, stopExp;
-            referenceImage.computeExposures(parameters.tonemapper, startExp, stopExp);
-            if(parameters.startExposure == std::numeric_limits<float>::infinity()) {
-                parameters.startExposure = startExp;
-            }
-            if(parameters.stopExposure == std::numeric_limits<float>::infinity()) {
-                parameters.stopExposure = stopExp;
-            }
+        if(parameters.exposure.unbounded()) {
+            const auto exposureRange = referenceImage.get_exposure_range(parameters.tonemapper);
+            if(std::isinf(parameters.exposure.min))
+                parameters.exposure.min = exposureRange.min;
+            if(std::isinf(parameters.exposure.max))
+                parameters.exposure.max = exposureRange.max;
         }
-        if(parameters.startExposure > parameters.stopExposure) {
+        if(parameters.exposure.min > parameters.exposure.max) {
             std::cout << "Start exposure must be smaller than stop exposure!\n";
-            exit(-1);
+            std::exit(-1);
         }
-        if(parameters.numExposures == -1)  // -1 means it has not been set by the user, so then we compute it.
-        {
-            parameters.numExposures = int(std::max(2.0f, std::ceil(parameters.stopExposure - parameters.startExposure)));
-        }
+        if(parameters.num_exposures == -1)  // -1 means it has not been set by the user, so then we compute it.
+            parameters.num_exposures = static_cast<int>(std::max(2.0f, std::ceil(parameters.exposure.range())));
     }
 
     if(useHDR)     // Compute HDR-FLIP.
     {
-        image<float3> rImage(referenceImage.getWidth(), referenceImage.getHeight());
-        image<float3> tImage(referenceImage.getWidth(), referenceImage.getHeight());
-        image<float> tmpErrorMap(referenceImage.getWidth(), referenceImage.getHeight(), 0.0f);
+        image<float3> rImage(referenceImage.get_width(), referenceImage.get_height());
+        image<float3> tImage(referenceImage.get_width(), referenceImage.get_height());
+        image<float> tmpErrorMap(referenceImage.get_width(), referenceImage.get_height(), 0.0f);
 
-        float exposureStepSize = (parameters.stopExposure - parameters.startExposure) / (parameters.numExposures - 1);
-        for(int i = 0; i < parameters.numExposures; i++) {
-            float exposure = parameters.startExposure + i * exposureStepSize;
+        float exposureStepSize = parameters.exposure.range() / (parameters.num_exposures - 1);
+        for(int i = 0; i < parameters.num_exposures; i++) {
+            float exposure = parameters.exposure.min + i * exposureStepSize;
             rImage.copy(referenceImage);
             tImage.copy(testImage);
             rImage.expose(exposure);
             tImage.expose(exposure);
-            rImage.toneMap(parameters.tonemapper);
-            tImage.toneMap(parameters.tonemapper);
+            rImage.apply_tonemap(parameters.tonemapper);
+            tImage.apply_tonemap(parameters.tonemapper);
             rImage.clamp();
             tImage.clamp();
             if(returnIntermediateLDRImages) {
                 intermediateLDRImages.push_back(new image<float3>(rImage));
                 intermediateLDRImages.push_back(new image<float3>(tImage));
             }
-            tmpErrorMap.LDR_FLIP(rImage, tImage, parameters.PPD);
+            tmpErrorMap.FLIP_ldr(rImage, tImage, parameters.ppd);
             if(returnIntermediateLDRFLIPImages) {
                 intermediateLDRFLIPImages.push_back(new image<float>(tmpErrorMap));
             }
-            errorMapFLIPOutput.setMaxExposure(tmpErrorMap, maxErrorExposureMapOutput, float(i) / (parameters.numExposures - 1));
+            errorMapFLIPOutput.set_max_exposure(tmpErrorMap, maxErrorExposureMapOutput, float(i) / (parameters.num_exposures - 1));
         }
     } else    // Compute LDR-FLIP.
     {
         referenceImage.clamp();     // The input images should always be in [0,1], but we clamp them here to avoid any problems.
         testImage.clamp();
-        errorMapFLIPOutput.LDR_FLIP(referenceImage, testImage, parameters.PPD);
+        errorMapFLIPOutput.FLIP_ldr(referenceImage, testImage, parameters.ppd);
     }
 }
 
 // This variant does not return any LDR images computed by HDR-FLIP and thus avoids two parameters (since using those is a rare use case).
 static void evaluate(image<float3>& referenceImageInput, image<float3>& testImageInput,
-    const bool useHDR, Parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput) {
+    const bool useHDR, parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput) {
     std::vector<image<float>*> intermediateLDRFLIPImages;
     std::vector<image<float3>*> intermediateLDRImages;
     evaluate(referenceImageInput, testImageInput, useHDR, parameters, errorMapFLIPOutput, maxErrorExposureMapOutput, false, intermediateLDRFLIPImages, false, intermediateLDRImages);
 }
 
 // This variant does not return the exposure map, which may also be used quite seldom.
-static void evaluate(image<float3>& referenceImageInput, image<float3>& testImageInput, const bool useHDR, Parameters& parameters,
+static void evaluate(image<float3>& referenceImageInput, image<float3>& testImageInput, const bool useHDR, parameters& parameters,
     image<float>& errorMapFLIPOutput) {
-    image<float> maxErrorExposureMapOutput(referenceImageInput.getWidth(), referenceImageInput.getHeight());
+    image<float> maxErrorExposureMapOutput(referenceImageInput.get_width(), referenceImageInput.get_height());
     evaluate(referenceImageInput, testImageInput, useHDR, parameters, errorMapFLIPOutput, maxErrorExposureMapOutput);
 }
 
@@ -671,13 +666,11 @@ static void evaluate(image<float3>& referenceImageInput, image<float3>& testImag
  *             Note that the user is responsible for deallocating the errorMapFLIPOutput image.
  */
 static void evaluate(const float* referenceThreeChannelImage, const float* testThreeChannelImage,
-    const int imageWidth, const int imageHeight, const bool useHDR, Parameters& parameters,
+    const int imageWidth, const int imageHeight, const bool useHDR, parameters& parameters,
     const bool applyMagmaMapToOutput, const bool computeMeanFLIPError, float& meanFLIPError, float** errorMapFLIPOutput) {
-    image<float3> referenceImage;
-    image<float3> testImage;
+    image<float3> referenceImage(std::span(referenceThreeChannelImage, imageWidth * imageHeight), imageWidth);
+    image<float3> testImage(std::span(testThreeChannelImage, imageWidth * imageHeight), imageWidth);
     image<float> errorMapFLIPOutputImage(imageWidth, imageHeight, 0.0f);
-    referenceImage.setPixels(referenceThreeChannelImage, imageWidth, imageHeight);
-    testImage.setPixels(testThreeChannelImage, imageWidth, imageHeight);
 
     evaluate(referenceImage, testImage, useHDR, parameters, errorMapFLIPOutputImage);
 
@@ -686,24 +679,24 @@ static void evaluate(const float* referenceThreeChannelImage, const float* testT
         float sum = 0.0f;
 
     #pragma omp parallel for
-        for(int y = 0; y < errorMapFLIPOutputImage.getHeight(); y++) {
-            for(int x = 0; x < errorMapFLIPOutputImage.getWidth(); x++) {
+        for(int y = 0; y < errorMapFLIPOutputImage.get_height(); y++) {
+            for(int x = 0; x < errorMapFLIPOutputImage.get_width(); x++) {
                 sum += errorMapFLIPOutputImage.get(x, y);
             }
         }
-        meanFLIPError = sum / (errorMapFLIPOutputImage.getWidth() * errorMapFLIPOutputImage.getHeight());
+        meanFLIPError = sum / (errorMapFLIPOutputImage.get_width() * errorMapFLIPOutputImage.get_height());
     }
 
     if(applyMagmaMapToOutput) {
         *errorMapFLIPOutput = new float[imageWidth * imageHeight * 3];
         image<float3> magmaMappedFLIPImage(imageWidth, imageHeight);
-        magmaMappedFLIPImage.colorMap(errorMapFLIPOutputImage, magmaMap);
-        memcpy(*errorMapFLIPOutput, magmaMappedFLIPImage.getHostData(), size_t(imageWidth) * imageHeight * sizeof(float) * 3);
+        magmaMappedFLIPImage.apply_color_map(errorMapFLIPOutputImage, MagmaMap);
+        memcpy(*errorMapFLIPOutput, magmaMappedFLIPImage.get_data(), size_t(imageWidth) * imageHeight * sizeof(float) * 3);
 
     } else    // No MagmaMap applied, which means that we will return the gray scale image.
     {
         *errorMapFLIPOutput = new float[imageWidth * imageHeight];
-        memcpy(*errorMapFLIPOutput, errorMapFLIPOutputImage.getHostData(), size_t(imageWidth) * imageHeight * sizeof(float));
+        memcpy(*errorMapFLIPOutput, errorMapFLIPOutputImage.get_data(), size_t(imageWidth) * imageHeight * sizeof(float));
     }
 }
 }
