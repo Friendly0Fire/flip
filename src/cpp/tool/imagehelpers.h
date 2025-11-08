@@ -58,29 +58,36 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <functional>
+#include <variant>
+
 #include "stb_image_write.h"
 
 namespace ImageHelpers
 {
-    bool ldrLoad(const std::string& filename, int& imgWidth, int& imgHeight, float*& pixels)
+    bool ldrLoad(const std::string& filename, int& imgWidth, int& imgHeight, float*& pixels, bool& alpha)
     {
-        int bpp;
-        unsigned char* ldrPixels = stbi_load(filename.c_str(), &imgWidth, &imgHeight, &bpp, 3);
+        alpha = false;
+        int channelCount;
+        unsigned char* ldrPixels = stbi_load(filename.c_str(), &imgWidth, &imgHeight, &channelCount, 0);
         if (!ldrPixels)
         {
             return false;
         }
+        alpha = channelCount == 4;
 
-        pixels = new float[3 * imgWidth * imgHeight];
+        pixels = new float[(alpha ? 4 : 3) * imgWidth * imgHeight];
 #pragma omp parallel for
         for (int y = 0; y < imgHeight; y++)
         {
             for (int x = 0; x < imgWidth; x++)
             {
-                int linearIdx = 3 * (y * imgWidth + x);
-                pixels[linearIdx + 0] = ldrPixels[linearIdx + 0] / 255.0f;
-                pixels[linearIdx + 1] = ldrPixels[linearIdx + 1] / 255.0f;
-                pixels[linearIdx + 2] = ldrPixels[linearIdx + 2] / 255.0f;
+                int linearIdxIn = channelCount * (y * imgWidth + x);
+                int linearIdxOut = (alpha ? 4 : 3) * (y * imgWidth + x);
+                pixels[linearIdxOut + 0] = ldrPixels[linearIdxIn] / 255.0f;
+                pixels[linearIdxOut + 1] = channelCount >= 2 ? ldrPixels[linearIdxIn + 1] / 255.0f : 0.f;
+                pixels[linearIdxOut + 2] = channelCount >= 3 ? ldrPixels[linearIdxIn + 2] / 255.0f : 0.f;
+                pixels[linearIdxOut + 3] = channelCount >= 4 ? ldrPixels[linearIdxIn + 3] / 255.0f : 0.f;
 
             }
         }
@@ -88,8 +95,10 @@ namespace ImageHelpers
         return true;
     }
 
-    bool hdrLoad(const std::string& fileName, int& imgWidth, int& imgHeight, float*& hdrPixels)
+    bool hdrLoad(const std::string& fileName, int& imgWidth, int& imgHeight, float*& hdrPixels, bool& alpha)
     {
+        alpha = false;
+
         EXRVersion exrVersion;
         EXRImage exrImage;
         EXRHeader exrHeader;
@@ -136,6 +145,7 @@ namespace ImageHelpers
         int idxR = -1;
         int idxG = -1;
         int idxB = -1;
+        int idxA = -1;
         int numRecognizedChannels = 0;
         for (int c = 0; c < exrHeader.num_channels; c++)
         {
@@ -158,14 +168,16 @@ namespace ImageHelpers
             }
             else if (channelName == "a")
             {
+                idxA = c;
                 ++numRecognizedChannels;
             }
         }
 
+        alpha = idxA != -1;
         auto rawImgChn = reinterpret_cast<float**>(exrImage.images);
         bool loaded = false;
 
-        hdrPixels = new float[imgWidth * imgHeight * 3];
+        hdrPixels = new float[imgWidth * imgHeight * (numRecognizedChannels == 4 ? 4 : 3)];
 
         
         if (numRecognizedChannels == 1)             // 1 channel images can be loaded into either scalar or vector formats.
@@ -199,7 +211,7 @@ namespace ImageHelpers
             }
             loaded = true;
         }
-        else if (numRecognizedChannels == 3 || numRecognizedChannels == 4) // 3 or 4 channel images can only be loaded into vector3/4 formats.
+        else if (numRecognizedChannels == 3) // 3 or 4 channel images can only be loaded into vector3/4 formats.
         {
             assert(idxR != -1 && idxG != -1 && idxB != -1);
 #pragma omp parallel for
@@ -211,6 +223,20 @@ namespace ImageHelpers
                     hdrPixels[3 * linearIdx + 0] = rawImgChn[idxR][linearIdx];
                     hdrPixels[3 * linearIdx + 1] = rawImgChn[idxG][linearIdx];
                     hdrPixels[3 * linearIdx + 2] = rawImgChn[idxB][linearIdx];
+                }
+            }
+            loaded = true;
+        } else if(numRecognizedChannels == 4) // 3 or 4 channel images can only be loaded into vector3/4 formats.
+        {
+            assert(idxR != -1 && idxG != -1 && idxB != -1 && idxA != -1);
+        #pragma omp parallel for
+            for(int y = 0; y < imgHeight; y++) {
+                for(int x = 0; x < imgWidth; x++) {
+                    int linearIdx = y * imgWidth + x;
+                    hdrPixels[4 * linearIdx + 0] = rawImgChn[idxR][linearIdx];
+                    hdrPixels[4 * linearIdx + 1] = rawImgChn[idxG][linearIdx];
+                    hdrPixels[4 * linearIdx + 2] = rawImgChn[idxB][linearIdx];
+                    hdrPixels[4 * linearIdx + 3] = rawImgChn[idxA][linearIdx];
                 }
             }
             loaded = true;
@@ -231,34 +257,55 @@ namespace ImageHelpers
     }
 
     // Note that when an image us loaded, the variable pixels is allocated, and it is up to the user to deallocate it later.
-    bool loadImage(const std::string& fileName, int& imgWidth, int& imgHeight, float*& pixels)
+    bool loadImage(const std::string& fileName, int& imgWidth, int& imgHeight, float*& pixels, bool& alpha)
     {
         bool bOk = false;
         std::string extension = fileName.substr(fileName.find_last_of(".") + 1);
         if (extension == "png" || extension == "bmp" || extension == "tga")
         {
-            bOk = ldrLoad(fileName, imgWidth, imgHeight, pixels);
+            bOk = ldrLoad(fileName, imgWidth, imgHeight, pixels, alpha);
         }
         else if (extension == "exr")
         {
-            bOk = hdrLoad(fileName, imgWidth, imgHeight, pixels);
+            bOk = hdrLoad(fileName, imgWidth, imgHeight, pixels, alpha);
         }
 
         return bOk;
     }
 
-    std::optional<FLIP::image<FLIP::float3>> load(const std::string& fileName)
+    template<typename F>
+    struct on_exit {
+        F func;
+
+        on_exit() = default;
+        explicit on_exit(F&& f) : func(std::forward<F>(f)) {}
+        on_exit(const on_exit&) = delete;
+        on_exit(on_exit&&) = default;
+
+        on_exit& operator=(const on_exit&) = delete;
+        on_exit& operator=(on_exit&&) = default;
+
+        ~on_exit() {
+            func();
+        }
+    };
+
+    std::variant<std::monostate, FLIP::image<FLIP::float3>, FLIP::image<FLIP::float4>> load(const std::string& fileName)
     {
         int imgWidth;
         int imgHeight;
         float* pixels;
-        if (loadImage(fileName, imgWidth, imgHeight, pixels))
+        bool alpha;
+        if (loadImage(fileName, imgWidth, imgHeight, pixels, alpha))
         {
-            FLIP::image<FLIP::float3> dstImage{ std::span(pixels, imgWidth * imgHeight * 3), imgWidth };
-            delete[] pixels;
-            return dstImage;
+            on_exit ex{ [&] { delete[] pixels; } };
+
+            if(alpha)
+                return FLIP::image<FLIP::float4>{ std::span(pixels, imgWidth * imgHeight * 4), imgWidth };
+            else
+                return FLIP::image<FLIP::float3>{ std::span(pixels, imgWidth * imgHeight * 3), imgWidth };
         }
-        return std::nullopt;
+        return std::monostate{};
     }
 
     bool pngSave(const std::string& filename, FLIP::image<FLIP::float3>& image)

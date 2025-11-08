@@ -43,6 +43,9 @@ public:
         this->copy(image);
     }
 
+    tensor(tensor&& image) noexcept
+        : dims_(image.dims_), area_(image.area_), volume_(image.volume_), data_(std::move(image.data_)) {}
+
     tensor(std::span<const T> input) {
         init({ static_cast<int>(input.size()), 1, 1 });
         std::ranges::copy(input, data_.begin());
@@ -65,6 +68,9 @@ public:
         std::ranges::copy(input2, data_.begin());
     }
 
+    tensor& operator=(const tensor&) = default;
+    tensor& operator=(tensor&&) = default;
+
     const T* get_data() const {
         return data_.data();
     }
@@ -80,11 +86,6 @@ public:
     void set(int x, int y, int z, const T& value) {
         data_[index(x, y, z)] = value;
     }
-
-    //void setPixels(const float* pPixels, const int width, const int height) {
-    //    init({ width, height, 1 });
-    //    memcpy((void*)data_, pPixels, size_t(width) * height * sizeof(T));
-    //}
 
     int3 get_dimensions() const {
         return dims_;

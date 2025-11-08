@@ -552,17 +552,28 @@ namespace FLIPTool
         }
 
         auto referenceImageOpt = ImageHelpers::load(referenceFileName.toString());   // Load reference image.
-        if (!referenceImageOpt)
+        if (referenceImageOpt.index() == 0)
         {
             std::cout << "Error: could not read reference image file <" << referenceFileName.toString() << ">. Note that FLIP only loads png, bmp, tga, and exr images. Exiting.\n";
             exit(EXIT_FAILURE);
         }
-        auto& referenceImage = *referenceImageOpt;
 
-        if (!bUseHDR)
-        {
-            referenceImage.srgb_to_linear_rgb();
-        }
+        using img3 = FLIP::image<FLIP::float3>;
+        using img4 = FLIP::image<FLIP::float4>;
+        auto parseImage = [bUseHDR](std::variant<std::monostate, img3, img4>& img) {
+            if(auto* f3 = std::get_if<img3>(&img)) {
+                if(!bUseHDR) f3->srgb_to_linear_rgb();
+                return f3->get_dimensions();
+            }
+            if(auto* f4 = std::get_if<img4>(&img)) {
+                if(!bUseHDR) f4->srgb_to_linear_rgb();
+                return f4->get_dimensions();
+            }
+
+            return FLIP::int3{ 0,0,0 };
+        };
+
+        const auto referenceImageDims = parseImage(referenceImageOpt);
 
         // Save firstTestFileName and firstPooledValue for optional overlapped histogram.
         const bool saveOverlappedHistogram = commandLine.optionSet("histogram") && commandLine.getOptionValues("test").size() == 2;
@@ -575,8 +586,6 @@ namespace FLIPTool
         for (auto& testFileNameString : commandLine.getOptionValues("test"))
         {
             pooledValues = FLIPPooling::pooling<float>(100); // Reset pooledValues to remove accumulation issues.
-            std::vector<FLIP::image<float>*> intermediateLDRFLIPImages;
-            std::vector<FLIP::image<FLIP::float3>*> intermediateLDRImages;
             testFileName = testFileNameString;
 
             if (!std::filesystem::exists(testFileName.toString()))
@@ -586,32 +595,29 @@ namespace FLIPTool
             }
             
             auto testImageOpt = ImageHelpers::load(testFileName.toString());     // Load test image.
-            if (!testImageOpt)
+            if (testImageOpt.index() == 0)
             {
                 std::cout << "Error: could not read test file <" << testFileName.toString() << ">. Note that FLIP only loads png, bmp, tga, and exr images. Exiting.\n";
                 exit(EXIT_FAILURE);
             }
-            auto& testImage = *testImageOpt;
-            if (referenceImage.get_width() != testImage.get_width() || referenceImage.get_height() != testImage.get_height())
+            const auto testImageDims = parseImage(testImageOpt);
+            if (referenceImageDims != testImageDims)
             {
-                std::cout << "Error: reference <" << referenceImage.get_width() << "x" << referenceImage.get_height() << "> and test <" << testImage.get_width() << "x" << testImage.get_height() << "> images must be of equal dimensions. Exiting.\n";
+                std::cout << "Error: reference <" << referenceImageDims[0] << "x" << referenceImageDims[1] << "> and test <" << testImageDims[0] << "x" << testImageDims[1] << "> images must be of equal dimensions. Exiting.\n";
                 exit(EXIT_FAILURE);
             }
 
-            if (!bUseHDR)
-            {
-                testImage.srgb_to_linear_rgb();
-            }
-
-            FLIP::image<float> errorMapFLIP(referenceImage.get_width(), referenceImage.get_height(), 0.0f);
-            FLIP::image<float> maxErrorExposureMap(referenceImage.get_width(), referenceImage.get_height());
+            FLIP::image<float> errorMapFLIP(referenceImageDims, 0.0f);
+            FLIP::image<float> maxErrorExposureMap(referenceImageDims);
 
             auto t0 = std::chrono::high_resolution_clock::now();
-            FLIP::evaluate(referenceImage, testImage, bUseHDR, parameters, errorMapFLIP, maxErrorExposureMap, returnLDRFLIPImages, intermediateLDRFLIPImages, returnLDRImages, intermediateLDRImages);
+            if(std::holds_alternative<img3>(referenceImageOpt))
+                FLIP::evaluate(std::get<img3>(referenceImageOpt), std::get<img3>(testImageOpt), bUseHDR, parameters, errorMapFLIP, maxErrorExposureMap);
+            else
+                FLIP::evaluate(std::get<img4>(referenceImageOpt), std::get<img4>(testImageOpt), bUseHDR, parameters, errorMapFLIP, maxErrorExposureMap);
             float time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - t0).count() / 1000000.0f;
 
             saveErrorAndExposureMaps(bUseHDR, commandLine, parameters, basename, errorMapFLIP, maxErrorExposureMap, destinationDirectory, referenceFileName, testFileName, histogramFileName, txtFileName, flipFileName, exposureFileName, verbosity, testFileCount);
-            saveIntermediateHDRFLIPOutput(commandLine, parameters, basename, flipFileName, referenceFileName, testFileName, destinationDirectory, intermediateLDRFLIPImages, intermediateLDRImages);
             gatherStatisticsAndSaveOutput(commandLine, errorMapFLIP, pooledValues, destinationDirectory, referenceFileName, testFileName, histogramFileName, txtFileName, flipFileName, exposureFileName, FLIPString, time, ++testFileCount, saveOverlappedHistogram, bUseHDR, verbosity);
 
             // Save first set of results for overlapped histogram.
@@ -627,7 +633,7 @@ namespace FLIPTool
             bool optionLog = commandLine.optionSet("log");
             bool optionExcludeValues = commandLine.optionSet("exclude-pooled-values");
             float yMax = (commandLine.optionSet("y-max") ? std::stof(commandLine.getOptionValue("y-max")) : 0.0f);
-            pooledValues.saveOverlappedHistogram(firstPooledValues, destinationDirectory + "/" + histogramFileName.toString(), referenceImage.get_width(), referenceImage.get_height(), optionLog, referenceFileName.getName(), firstTestFileName.getName(), testFileName.getName(), !optionExcludeValues, yMax);
+            pooledValues.saveOverlappedHistogram(firstPooledValues, destinationDirectory + "/" + histogramFileName.toString(), referenceImageDims[0], referenceImageDims[1], optionLog, referenceFileName.getName(), firstTestFileName.getName(), testFileName.getName(), !optionExcludeValues, yMax);
         }
 
         float timeTotal = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - timeStart).count() / 1000000.0f;
