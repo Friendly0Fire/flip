@@ -8,11 +8,12 @@
 
 namespace FLIP {
 
-union int3 {
+struct int3 {
     std::array<int, 3> data = { 0 };
-    decltype(auto) x(this auto&& self) { return std::forward<decltype(self)>(self).data[0]; }
-    decltype(auto) y(this auto&& self) { return std::forward<decltype(self)>(self).data[1]; }
-    decltype(auto) z(this auto&& self) { return std::forward<decltype(self)>(self).data[1]; }
+
+    inline int x() const { return data[0]; }
+    inline int y() const { return data[1]; }
+    inline int z() const { return data[2]; }
 };
 
 template<size_t N>
@@ -40,15 +41,15 @@ class floatN {
 public:
     std::array<float, N> data = { 0.f };
 
-    decltype(auto) x(this auto&& self) { return std::forward<decltype(self)>(self).data[0]; }
-    decltype(auto) y(this auto&& self) requires (N >= 2) { return std::forward<decltype(self)>(self).data[1]; }
-    decltype(auto) z(this auto&& self) requires (N >= 3) { return std::forward<decltype(self)>(self).data[1]; }
-    decltype(auto) w(this auto&& self) requires (N >= 4) { return std::forward<decltype(self)>(self).data[1]; }
+    auto&& x(this auto&& self)                   { return FWD(self).data[0]; }
+    auto&& y(this auto&& self) requires (N >= 2) { return FWD(self).data[1]; }
+    auto&& z(this auto&& self) requires (N >= 3) { return FWD(self).data[2]; }
+    auto&& w(this auto&& self) requires (N >= 4) { return FWD(self).data[3]; }
 
-    decltype(auto) r(this auto&& self) { return std::forward<decltype(self)>(self).data[0]; }
-    decltype(auto) g(this auto&& self) requires (N >= 2) { return std::forward<decltype(self)>(self).data[1]; }
-    decltype(auto) b(this auto&& self) requires (N >= 3) { return std::forward<decltype(self)>(self).data[1]; }
-    decltype(auto) a(this auto&& self) requires (N >= 4) { return std::forward<decltype(self)>(self).data[1]; }
+    auto&& r(this auto&& self)                   { return FWD(self).data[0]; }
+    auto&& g(this auto&& self) requires (N >= 2) { return FWD(self).data[1]; }
+    auto&& b(this auto&& self) requires (N >= 3) { return FWD(self).data[2]; }
+    auto&& a(this auto&& self) requires (N >= 4) { return FWD(self).data[3]; }
 
     constexpr floatN() = default;
 
