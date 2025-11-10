@@ -4,11 +4,11 @@
   "Items": [
     {
       "Id": "673a0a66-0ff7-47fa-9df9-b53f4cc15d9d",
-      "Command": " -r \"F:\\work\\toolbag\\test_image_output\\test_painting\\painting_splines_normal_1002_reference.png\""
+      "Command": " -r \"F:\\work\\flip\\testimg.png\""
     },
     {
       "Id": "e14c58b5-64e6-40e2-a975-2ccd2dfdafba",
-      "Command": " -t \"F:\\work\\toolbag\\test_image_output\\test_painting\\painting_splines_normal_1002_result.png\""
+      "Command": " -t \"F:\\work\\flip\\testimg2.png\""
     }
   ]
 }

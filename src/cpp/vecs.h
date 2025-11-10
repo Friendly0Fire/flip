@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <span>
 #include <ranges>
 
@@ -86,6 +87,11 @@ public:
     constexpr floatN(Args... args) {
         size_t i = 0;
         ((data[i++] = args), ...);
+    }
+
+    template<size_t N2>
+    constexpr floatN(const floatN<N2>& other) {
+        std::ranges::copy_n(other.data.begin(), std::min(N, N2), data);
     }
 
     constexpr float& operator[](size_t i) {
@@ -228,19 +234,30 @@ public:
     }
 
     template<typename... Args> requires (std::is_arithmetic_v<Args> && ...)
-    constexpr inline floatN replace(Args... args) const {
+        constexpr inline floatN replace_at(size_t i, Args... args) const {
         floatN v = *this;
-        size_t i = 0;
+        assert(i + sizeof...(Args) <= N);
         ((v.data[i++] = args), ...);
+        return v;
+    }
+
+    template<typename... Args> requires (std::is_arithmetic_v<Args> && ...)
+        constexpr inline floatN replace(Args... args) const {
+        return replace_at(0, std::forward<Args>(args)...);
+    }
+
+    template<size_t N2> requires (N2 <= N)
+    constexpr inline floatN replace_at(size_t o, const floatN<N2>& v2) const {
+        assert(o <= N);
+        floatN v = *this;
+        for(size_t i = 0; i < std::min(N - o, N2); ++i)
+            v[i + o] = v2[i];
         return v;
     }
 
     template<size_t N2> requires (N2 <= N)
     constexpr inline floatN replace(const floatN<N2>& v2) const {
-        floatN v = *this;
-        for(size_t i = 0; i < std::min(N, N2); ++i)
-            v[i] = v2[i];
-        return v;
+        return replace_at(0, v2);
     }
 };
 
@@ -280,11 +297,8 @@ constexpr static inline floatN<N> linear_rgb_to_xyz(const floatN<N>& RGB) requir
     const float X = a11 * RGB.r() + a12 * RGB.g() + a13 * RGB.b();
     const float Y = a21 * RGB.r() + a22 * RGB.g() + a23 * RGB.b();
     const float Z = a31 * RGB.r() + a32 * RGB.g() + a33 * RGB.b();
-    if constexpr(N >= 4) {
-        // Pretend alpha is like luminance (Y) of a gray value and store in A
-        const float A = a21 * RGB.a() + a22 * RGB.a() + a23 * RGB.a();
-        return RGB.replace(X, Y, Z, A);
-    }
+    // If alpha is present, it is interpreted as a grayscale color value
+    // and thus equals Y, the luminance, so no transformation is required
     return RGB.replace(X, Y, Z);
 }
 
@@ -304,34 +318,30 @@ constexpr static inline floatN<N> xyz_to_linear_rgb(const floatN<N>& XYZ) requir
     float R = a11 * XYZ.x() + a12 * XYZ.y() + a13 * XYZ.z();
     float G = a21 * XYZ.x() + a22 * XYZ.y() + a23 * XYZ.z();
     float B = a31 * XYZ.x() + a32 * XYZ.y() + a33 * XYZ.z();
-    if constexpr(N >= 4) {
-        // Pretend alpha is purely luminance (Y), so recover it from the average luminance RGB
-        const float A = (a12 * XYZ.a() + a22 * XYZ.a() + a32 * XYZ.a()) / 3.f;
-        return XYZ.replace(R, G, B, A);
-    }
+    // If alpha is present, it is interpreted as a grayscale color value
+    // and thus equals Y, the luminance, so no transformation is required
     return XYZ.replace(R, G, B);
 }
 
 template<size_t N>
 static inline floatN<N> xyz_to_cielab(const floatN<N>& XYZ, const floatN<3>& invReferenceIlluminant = INV_DEFAULT_ILLUMINANT) requires (N >= 3) {
-    constexpr float delta = 6.0f / 29.0f;
-    constexpr float deltaSquare = delta * delta;
-    constexpr float deltaCube = delta * deltaSquare;
-    constexpr float factor = 1.0f / (3.0f * deltaSquare);
-    constexpr float term = 4.0f / 29.0f;
+    
+    auto piecewise = [](float f) {
+        constexpr float delta = 6.0f / 29.0f;
+        constexpr float deltaCube = delta * delta * delta;
+        constexpr float factor = 1.0f / (3.0f * delta * delta);
+        constexpr float term = 4.0f / 29.0f;
+        return f > deltaCube ? std::pow(f, 1.f / 3.f) : factor * f + term;
+    };
 
     // The default illuminant is D65.
-    floatN<3> XYZ2 = XYZ;
-    XYZ2 *= invReferenceIlluminant;
-    XYZ2.x() = (XYZ2.x() > deltaCube ? std::pow(XYZ2.x(), 1.0f / 3.0f) : factor * XYZ2.x() + term);
-    XYZ2.y() = (XYZ2.y() > deltaCube ? std::pow(XYZ2.y(), 1.0f / 3.0f) : factor * XYZ2.y() + term);
-    XYZ2.z() = (XYZ2.z() > deltaCube ? std::pow(XYZ2.z(), 1.0f / 3.0f) : factor * XYZ2.z() + term);
+    const auto XYZ2 = (floatN<3>(XYZ) * invReferenceIlluminant).spread(piecewise);
     const float L = 116.0f * XYZ2.y() - 16.0f;
     const float a = 500.0f * (XYZ2.x() - XYZ2.y());
     const float b = 200.0f * (XYZ2.y() - XYZ2.z());
 
     if constexpr(N >= 4) {
-        const float A = 116.0f * XYZ.a() - 16.0f;
+        const float A = 116.0f * piecewise(XYZ.a()) - 16.0f;
         return XYZ.replace(L, a, b, A);
     }
     return XYZ.replace(L, a, b);
@@ -344,16 +354,15 @@ constexpr static inline floatN<N> cielab_to_xyz(const floatN<N>& Lab, const floa
     float X = Lab[1] / 500.0f + Y;
     float Z = Y - Lab[2] / 200.0f;
 
-    const float delta = 6.0f / 29.0f;
-    const float factor = 3.0f * delta * delta;
-    const float term = 4.0f / 29.0f;
-    floatN<3> XYZ;
-    XYZ[0] = (X > delta ? X * X * X : (X - term) * factor);
-    XYZ[1] = (Y > delta ? Y * Y * Y : (Y - term) * factor);
-    XYZ[2] = (Z > delta ? Z * Z * Z : (Z - term) * factor);
-    XYZ *= referenceIlluminant;
+    auto piecewise = [](float f) {
+        constexpr float delta = 6.0f / 29.0f;
+        constexpr float factor = 3.0f * delta * delta;
+        constexpr float term = 4.0f / 29.0f;
+        return f > delta ? f * f * f : (f - term) * factor;
+    };
+    const auto XYZ = floatN<3>(X, Y, Z).spread(piecewise) * referenceIlluminant;
     if constexpr(N >= 4) {
-        const float A = (Lab[3] + 16.0f) / 116.0f;
+        const float A = piecewise((Lab[3] + 16.0f) / 116.0f);
         return Lab.replace(XYZ.x(), XYZ.y(), XYZ.z(), A);
     }
     return Lab.replace(XYZ);
@@ -368,6 +377,7 @@ constexpr static inline floatN<N> xyz_to_ycxcz(const floatN<N>& XYZ, const float
     const float Cx = 500.0f * (XYZ2[0] - XYZ2[1]);
     const float Cz = 200.0f * (XYZ2[1] - XYZ2[2]);
     if constexpr(N >= 4) {
+        // If alpha is present, encode it the same way Y, the luminance, is encoded into YCxCz
         const float A = 116.0f * XYZ[3] - 16.0f;
         return XYZ.replace(Y, Cx, Cz, A);
     }
@@ -385,6 +395,7 @@ constexpr static inline floatN<N> ycxycz_to_xyz(const floatN<N>& YCxCz, const fl
     floatN<3> XYZ(X, Y, Z);
     XYZ *= referenceIlluminant;
     if constexpr(N >= 4) {
+        // If alpha is present, decode it the same way Y, the luminance, is decoded from YCxCz
         const float A = (YCxCz[3] + 16.0f) / 116.0f;
         return YCxCz.replace(XYZ.x(), XYZ.y(), XYZ.z(), A);
     }

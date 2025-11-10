@@ -112,19 +112,27 @@ constexpr inline float hunt(const float luminance, const float chrominance) {
     return 0.01f * luminance * chrominance;
 }
 
-template<size_t N>
+template<size_t N> requires (N >= 3)
+constexpr inline floatN<N> hunt(const floatN<N>& val) {
+    return val.replace_at(1, hunt(val[0], val[1]), hunt(val[0], val[2]));
+}
+
+template<size_t N> requires (N >= 3)
 inline float hy_ab(const floatN<N>& refPixel, const floatN<N>& testPixel) {
     float cityBlockDistanceL = std::fabs(refPixel[0] - testPixel[0]);
     float euclideanDistanceAB = std::sqrt(square(refPixel[1] - testPixel[1]) + square(refPixel[2] - testPixel[2]));
+    // If present, alpha is considered equivalent to a grayscale color:
+    // In L*a*b* space, L* represents luminance and a* and b* are effectively zero for a grayscale value
+    // Therefore, alpha distance is represented purely by L* distance
     float cityBlockDistanceA = N >= 4 ? std::fabs(refPixel[3] - testPixel[3]) : 0.f;
     return cityBlockDistanceL + cityBlockDistanceA + euclideanDistanceAB;
 }
 
 inline float max_distance(float gqc) {
-    static const floatN greenLab = xyz_to_cielab(linear_rgb_to_xyz(floatN<3>(0.0f, 1.0f, 0.0f)));
-    static const floatN blueLab = xyz_to_cielab(linear_rgb_to_xyz(floatN<3>(0.0f, 0.0f, 1.0f)));
-    static const floatN greenLabHunt = floatN<3>(greenLab[0], hunt(greenLab[0], greenLab[1]), hunt(greenLab[0], greenLab[2]));
-    static const floatN blueLabHunt = floatN<3>(blueLab[0], hunt(blueLab[0], blueLab[1]), hunt(blueLab[0], blueLab[2]));
+    static const auto greenLab = xyz_to_cielab(linear_rgb_to_xyz(floatN<3>(0.0f, 1.0f, 0.0f)));
+    static const auto blueLab = xyz_to_cielab(linear_rgb_to_xyz(floatN<3>(0.0f, 0.0f, 1.0f)));
+    static const auto greenLabHunt = hunt(greenLab);
+    static const auto blueLabHunt = hunt(blueLab);
     return std::pow(hy_ab(greenLabHunt, blueLabHunt), gqc);
 }
 
@@ -437,16 +445,14 @@ image<float> color_difference(const image<T>& referenceImage, const image<T>& te
             filteredYCxCzTest = xyz_to_linear_rgb(ycxycz_to_xyz(filteredYCxCzTest)).clamp();
 
             // Move from linear RGB to CIELab.
-            filteredYCxCzReference = xyz_to_cielab(linear_rgb_to_xyz(filteredYCxCzReference));
-            filteredYCxCzTest = xyz_to_cielab(linear_rgb_to_xyz(filteredYCxCzTest));
+            auto filteredCIELabReference = xyz_to_cielab(linear_rgb_to_xyz(filteredYCxCzReference));
+            auto filteredCIELabTest = xyz_to_cielab(linear_rgb_to_xyz(filteredYCxCzTest));
 
             // Apply Hunt adjustment.
-            filteredYCxCzReference.y() = hunt(filteredYCxCzReference.x(), filteredYCxCzReference.y());
-            filteredYCxCzReference.z() = hunt(filteredYCxCzReference.x(), filteredYCxCzReference.z());
-            filteredYCxCzTest.y() = hunt(filteredYCxCzTest.x(), filteredYCxCzTest.y());
-            filteredYCxCzTest.z() = hunt(filteredYCxCzTest.x(), filteredYCxCzTest.z());
+            filteredCIELabReference = hunt(filteredCIELabReference);
+            filteredCIELabTest = hunt(filteredCIELabTest);
 
-            float colorDifference = hy_ab(filteredYCxCzReference, filteredYCxCzTest);
+            float colorDifference = hy_ab(filteredCIELabReference, filteredCIELabTest);
 
             colorDifference = powf(colorDifference, FLIPConstants.gqc);
 
