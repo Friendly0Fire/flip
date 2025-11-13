@@ -39,6 +39,9 @@ static_assert(floatN_like<float, 3>);
 static_assert(floatN_like<int, 3>);
 static_assert(!floatN_like<floatN<2>, 3>);
 
+template<typename T, size_t N>
+concept floatN_at_least = floatN_like<T, N> && (T::count >= N);
+
 template<size_t N>
 class floatN {
     constexpr static float& at(floatN& f, size_t i) {
@@ -56,15 +59,15 @@ public:
 
     std::array<float, N> data = { 0.f };
 
-    auto&& x(this auto&& self)                   { return FWD(self).data[0]; }
-    auto&& y(this auto&& self) requires (N >= 2) { return FWD(self).data[1]; }
-    auto&& z(this auto&& self) requires (N >= 3) { return FWD(self).data[2]; }
-    auto&& w(this auto&& self) requires (N >= 4) { return FWD(self).data[3]; }
-
-    auto&& r(this auto&& self)                   { return FWD(self).data[0]; }
-    auto&& g(this auto&& self) requires (N >= 2) { return FWD(self).data[1]; }
-    auto&& b(this auto&& self) requires (N >= 3) { return FWD(self).data[2]; }
-    auto&& a(this auto&& self) requires (N >= 4) { return FWD(self).data[3]; }
+    constexpr auto&& x(this auto&& self)                   { return FWD(self).data[0]; }
+    constexpr auto&& y(this auto&& self) requires (N >= 2) { return FWD(self).data[1]; }
+    constexpr auto&& z(this auto&& self) requires (N >= 3) { return FWD(self).data[2]; }
+    constexpr auto&& w(this auto&& self) requires (N >= 4) { return FWD(self).data[3]; }
+    
+    constexpr auto&& r(this auto&& self)                   { return FWD(self).data[0]; }
+    constexpr auto&& g(this auto&& self) requires (N >= 2) { return FWD(self).data[1]; }
+    constexpr auto&& b(this auto&& self) requires (N >= 3) { return FWD(self).data[2]; }
+    constexpr auto&& a(this auto&& self) requires (N >= 4) { return FWD(self).data[3]; }
 
     constexpr floatN() = default;
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include "vecs.h"
 
 namespace FLIP {
@@ -6,45 +7,34 @@ namespace FLIP {
 template<typename T>
 class tensor {
 protected:
+    std::vector<T> data_;
     int3 dims_ = { 0, 0, 0 };
     uint32_t area_ = 0, volume_ = 0;
-    std::vector<T> data_;
 
-protected:
-    void init(const int3 dims, bool should_clear = false, const T& clear_color = T(0.0f)) {
-        dims_ = dims;
-        area_ = dims.x() * dims.y();
-        volume_ = dims.x() * dims.y() * dims.z();
-
-        data_.resize(volume_);
-
-        if(should_clear) {
-            clear(clear_color);
-        }
-    }
+    void init(const int3& dims, bool should_clear = false, const T& clear_color = T(0.0f));
 
 public:
     tensor() = default;
 
     tensor(const int width, const int height, const int depth) {
-        this->init({ width, height, depth });
+        init({ width, height, depth });
     }
 
     tensor(const int width, const int height, const int depth, const T clearColor) {
-        this->init({ width, height, depth }, true, clearColor);
+        init({ width, height, depth }, true, clearColor);
     }
 
     tensor(const int3 dim, const T clearColor) {
-        this->init(dim, true, clearColor);
+        init(dim, true, clearColor);
     }
 
     tensor(const tensor& image) {
-        this->init(image.dims_);
-        this->copy(image);
+        init(image.dims_);
+        copy(image);
     }
 
     tensor(tensor&& image) noexcept
-        : dims_(image.dims_), area_(image.area_), volume_(image.volume_), data_(std::move(image.data_)) {}
+        : data_(std::move(image.data_)), dims_(image.dims_), area_(image.area_), volume_(image.volume_) {}
 
     tensor(std::span<const T> input) {
         init({ static_cast<int>(input.size()), 1, 1 });
@@ -52,13 +42,13 @@ public:
     }
 
     tensor(std::span<const T> input, int width) {
-        init({ width, input.size() / width, 1 });
+        init({ width, static_cast<int>(input.size()) / width, 1 });
         std::ranges::copy(input, data_.begin());
     }
 
     tensor(std::span<const float> input) requires (!std::same_as<T, float>) {
         std::span<const T> input2(reinterpret_cast<const T*>(input.data()), input.size() / T::count);
-        init({ input2.size(), 1, 1 });
+        init({ static_cast<int>(input2.size()), 1, 1 });
         std::ranges::copy(input2, data_.begin());
     }
 
@@ -75,7 +65,7 @@ public:
         return data_.data();
     }
 
-    inline int index(int x, int y = 0, int z = 0) const {
+    [[nodiscard]] int index(int x, int y = 0, int z = 0) const {
         return (z * dims_.y() + y) * dims_.x() + x;
     }
 
@@ -87,136 +77,43 @@ public:
         data_[index(x, y, z)] = value;
     }
 
-    int3 get_dimensions() const {
+    [[nodiscard]] int3 get_dimensions() const {
         return dims_;
     }
 
-    int get_width() const {
+    [[nodiscard]] int get_width() const {
         return dims_.x();
     }
 
-    int get_height() const {
+    [[nodiscard]] int get_height() const {
         return dims_.y();
     }
 
-    int get_depth() const {
+    [[nodiscard]] int get_depth() const {
         return dims_.z();
     }
 
-    void apply_color_map(const tensor<float>& srcImage, const tensor<float3>& colorMap) requires std::same_as<T, float3> {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, colorMap.get(static_cast<int>(srcImage.get(x, y, z) * 255.0f + 0.5f) % colorMap.get_width(), 0, 0));
-                }
-            }
-        }
-    }
+    void srgb_to_ycxcz() requires floatN_at_least<T, 3>;
+    void srgb_to_linear_rgb() requires floatN_at_least<T, 3>;
+    void linear_rgb_to_ycxcz() requires floatN_at_least<T, 3>;
+    void linear_rgb_to_srgb() requires floatN_at_least<T, 3>;
+    void apply_tonemap(tonemapper tm) requires floatN_at_least<T, 3>;
+    void apply_color_map(const tensor<float>& srcImage, const tensor<float3>& colorMap) requires floatN_at_least<T, 3>;
+    void expand_grayscale(const tensor<float>& srcImage);
 
-    void srgb_to_ycxcz() {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, FLIP::xyz_to_ycxcz(FLIP::linear_rgb_to_xyz(FLIP::srgb_to_linear_rgb(get(x, y, z)))));
-                }
-            }
-        }
-    }
-
-    void srgb_to_linear_rgb() {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, FLIP::srgb_to_linear_rgb(get(x, y, z)));
-                }
-            }
-        }
-    }
-
-    void linear_rgb_to_ycxcz() {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, FLIP::xyz_to_ycxcz(FLIP::linear_rgb_to_xyz(get(x, y, z))));
-                }
-            }
-        }
-    }
-
-    void linear_rgb_to_srgb() {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, FLIP::linear_rgb_to_srgb(get(x, y, z)));
-                }
-            }
-        }
-    }
+    void clamp(float low = 0.0f, float high = 1.0f);
 
     void clear(const T color = T(0.0f)) {
         std::ranges::fill(data_, color);
     }
 
-    void clamp(float low = 0.0f, float high = 1.0f) {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, get(x, y, z).clamp(low, high));
-                }
-            }
-        }
-    }
-
-    void apply_tonemap(tonemapper tm) {
-        if(tm == tonemapper::reinhard) {
-            for(int z = 0; z < get_depth(); z++) {
-            #pragma omp parallel for
-                for(int y = 0; y < get_height(); y++) {
-                    for(int x = 0; x < get_width(); x++) {
-                        float3 color = get(x, y, z);
-                        float luminance = linear_rgb_to_luminance(color);
-                        float factor = 1.0f / (1.0f + luminance);
-                        set(x, y, z, color * factor);
-                    }
-                }
-            }
-            return;
-        }
-
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    const float* tc = ToneMappingCoefficients[std::to_underlying(tm)];
-                    float3 color = get(x, y, z);
-                    set(x, y, z, float3(((color * color) * tc[0] + color * tc[1] + tc[2]) / (color * color * tc[3] + color * tc[4] + tc[5])));
-                }
-            }
-        }
-    }
-
-    void copy(const tensor<T>& srcImage) {
+    void copy(const tensor& srcImage) {
         if(dims_.x() == srcImage.get_width() && dims_.y() == srcImage.get_height() && dims_.z() == srcImage.get_depth()) {
             data_ = srcImage.data_;
         }
     }
 
-    void expand_grayscale(const tensor<float>& srcImage) {
-        for(int z = 0; z < get_depth(); z++) {
-        #pragma omp parallel for
-            for(int y = 0; y < get_height(); y++) {
-                for(int x = 0; x < get_width(); x++) {
-                    set(x, y, z, float3(srcImage.get(x, y, z)));
-                }
-            }
-        }
-    }
 };
+
 
 }

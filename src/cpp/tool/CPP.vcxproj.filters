@@ -27,11 +27,11 @@
       <Filter>tool</Filter>
     </ClInclude>
     <ClInclude Include="..\util.h" />
-    <ClInclude Include="..\maps.h" />
     <ClInclude Include="..\tensor.h" />
     <ClInclude Include="..\vecs.h" />
     <ClInclude Include="..\gaussian.h" />
     <ClInclude Include="..\float_vec.h" />
+    <ClInclude Include="..\image.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="tool">
@@ -42,5 +42,7 @@
     <ClCompile Include="FLIP-tool.cpp">
       <Filter>tool</Filter>
     </ClCompile>
+    <ClCompile Include="..\FLIP.cpp" />
+    <ClCompile Include="..\tensor.cpp" />
   </ItemGroup>
 </Project>

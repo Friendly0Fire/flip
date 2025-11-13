@@ -92,9 +92,9 @@
   <ItemGroup>
     <ClInclude Include="..\float_vec.h" />
     <ClInclude Include="..\gaussian.h" />
+    <ClInclude Include="..\image.h" />
     <ClInclude Include="..\vecs.h" />
     <ClInclude Include="..\FLIP.h" />
-    <ClInclude Include="..\maps.h" />
     <ClInclude Include="..\tensor.h" />
     <ClInclude Include="..\util.h" />
     <ClInclude Include="commandline.h" />
@@ -107,7 +107,12 @@
     <ClInclude Include="tinyexr.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="FLIP-tool.cpp" />
+    <ClCompile Include="..\FLIP.cpp" />
+    <ClCompile Include="..\tensor.cpp" />
+    <ClCompile Include="FLIP-tool.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
