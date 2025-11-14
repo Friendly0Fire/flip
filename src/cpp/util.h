@@ -4,6 +4,8 @@
 #include <numbers>
 #include <string_view>
 #include <format>
+#include <execution>
+#include <ranges>
 
 #define FWD(...) std::forward<decltype(__VA_ARGS__)>(__VA_ARGS__)
 
@@ -96,6 +98,12 @@ struct exposure_range {
         return max - min;
     }
 };
+
+template<typename I>
+void parallel_for(I a, I b, auto&& func) {
+    auto rng = std::views::iota(a, b);
+    std::for_each(std::execution::par_unseq, std::begin(rng), std::end(rng), FWD(func));
+}
 
 }
 

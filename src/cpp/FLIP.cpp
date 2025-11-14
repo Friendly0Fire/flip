@@ -105,8 +105,7 @@ inline float max_distance(float gqc) {
 
 template<typename T>
 static void set_max_exposure(image<T>& input, image<float>& errorMap, image<float>& exposureMap, float exposure) {
-#pragma omp parallel for
-    for(int y = 0; y < input.get_height(); y++) {
+    parallel_for(0, input.get_height(), [&](int y) {
         for(int x = 0; x < input.get_width(); x++) {
             const float srcValue = errorMap.get(x, y);
             const float dstValue = input.get(x, y);
@@ -116,18 +115,17 @@ static void set_max_exposure(image<T>& input, image<float>& errorMap, image<floa
                 input.set(x, y, srcValue);
             }
         }
-    }
+    });
 }
 
 template<typename T>
 static void expose(image<T>& input, float level) {
     const float m = std::pow(2.0f, level);
-#pragma omp parallel for
-    for(int y = 0; y < input.get_height(); y++) {
+    parallel_for(0, input.get_height(), [&](int y) {
         for(int x = 0; x < input.get_width(); x++) {
             input.set(x, y, input.get(x, y) * m);
         }
-    }
+    });
 }
 
 template<typename T>
@@ -282,8 +280,7 @@ image<float> color_difference(const image<T>& referenceImage, const image<T>& te
     const int h = referenceImage.get_height();
 
     // Filter in x direction.
-#pragma omp parallel for
-    for(int y = 0; y < h; y++) {
+    parallel_for(0, h, [&](int y) {
         for(int x = 0; x < w; x++) {
             T intermediateYCxReference = 0.f;
             T intermediateYCxTest = 0.f;
@@ -304,7 +301,7 @@ image<float> color_difference(const image<T>& referenceImage, const image<T>& te
                     intermediateCzReference[i] += weightsCz[i] * referenceColor[2];
                     intermediateCzTest[i] += weightsCz[i] * testColor[2];
                 }
-                
+
                 if constexpr(T::count == 4) {
                     intermediateYCxReference[3] += weightsYCx[0] * referenceColor[3];
                     intermediateYCxTest[3] += weightsYCx[0] * testColor[3];
@@ -316,11 +313,10 @@ image<float> color_difference(const image<T>& referenceImage, const image<T>& te
             intermediateCzImageReference.set(x, y, intermediateCzReference);
             intermediateCzImageTest.set(x, y, intermediateCzTest);
         }
-    }
+    });
 
     // Filter in y direction.
-#pragma omp parallel for
-    for(int y = 0; y < h; y++) {
+    parallel_for(0, h, [&](int y) {
         for(int x = 0; x < w; x++) {
             T filteredYCxReference = 0.f;
             T filteredYCxTest = 0.f;
@@ -379,7 +375,7 @@ image<float> color_difference(const image<T>& referenceImage, const image<T>& te
             }
             difference.set(x, y, colorDifference);
         }
-    }
+    });
 
     return difference;
 }
@@ -404,8 +400,7 @@ void feature_difference_and_final_error(image<float>& resultImage, const image<T
     // We filter both reference and test image simultaneously (for better performance).
     constexpr float oneOver116 = 1.0f / 116.0f;
     constexpr float sixteenOver116 = 16.0f / 116.0f;
-#pragma omp parallel for
-    for(int y = 0; y < h; y++) {
+    parallel_for(0, h, [&](int y) {
         for(int x = 0; x < w; x++) {
             float dxReference = 0.0f, dxTest = 0.0f, ddxReference = 0.0f, ddxTest = 0.0f;
             float xReference = 0.0f, xTest = 0.0f;
@@ -458,14 +453,13 @@ void feature_difference_and_final_error(image<float>& resultImage, const image<T
                 intermediateFeaturesImageTest.set(x, y, intermediate_t(dxTest, ddxTest, xTest));
             }
         }
-    }
+    });
 
     // Convolve in y direction (1st and 2nd derivative for filter in y direction, Gaussian in x direction), then compute difference.
     // For details on the convolution, see separatedConvolutions.pdf in the FLIP repository:
     // https://github.com/NVlabs/flip/blob/main/misc/separatedConvolutions.pdf
     // We filter both reference and test image simultaneously (for better performance).
-#pragma omp parallel for
-    for(int y = 0; y < h; y++) {
+    parallel_for(0, h, [&](int y) {
         for(int x = 0; x < w; x++) {
             float dxReference = 0.0f, dxTest = 0.0f, ddxReference = 0.0f, ddxTest = 0.0f;
             float dyReference = 0.0f, dyTest = 0.0f, ddyReference = 0.0f, ddyTest = 0.0f;
@@ -531,7 +525,7 @@ void feature_difference_and_final_error(image<float>& resultImage, const image<T
 
             resultImage.set(x, y, errorFLIP);
         }
-    }
+    });
 }
 
 template<typename T>
@@ -625,12 +619,11 @@ evaluate_status evaluate<float4>(const image<float4>& referenceImageInput, const
 
 float get_mean_error(const image<float>& errorMapFLIPOutputImage) {
     float sum = 0.0f;
-#pragma omp parallel for
-    for(int y = 0; y < errorMapFLIPOutputImage.get_height(); y++) {
+    parallel_for(0, errorMapFLIPOutputImage.get_height(), [&](int y) {
         for(int x = 0; x < errorMapFLIPOutputImage.get_width(); x++) {
             sum += errorMapFLIPOutputImage.get(x, y);
         }
-    }
+    });
     return sum / static_cast<float>(errorMapFLIPOutputImage.get_width() * errorMapFLIPOutputImage.get_height());
 }
 
