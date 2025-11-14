@@ -206,10 +206,10 @@ namespace FLIPTool
 
         if (!commandLine.optionSet("no-error-map"))
         {
-            FLIP::image<FLIP::float3> pngResult(errorMapFLIP.get_width(), errorMapFLIP.get_height());
+            FLIP::image<FLIP::float3> pngResult;
             if (!commandLine.optionSet("no-magma"))
             {
-                pngResult.apply_color_map(errorMapFLIP, FLIP::MagmaMap);
+                pngResult = FLIP::apply_color_map(errorMapFLIP, FLIP::color_map::magma);
             }
             else
             {
@@ -222,8 +222,7 @@ namespace FLIPTool
         {
             if (!commandLine.optionSet("no-exposure-map"))
             {
-                FLIP::image<FLIP::float3> pngMaxErrorExposureMap(maxErrorExposureMap.get_width(), maxErrorExposureMap.get_height());
-                pngMaxErrorExposureMap.apply_color_map(maxErrorExposureMap, FLIP::ViridisMap);
+                FLIP::image<FLIP::float3> pngMaxErrorExposureMap = FLIP::apply_color_map(maxErrorExposureMap, FLIP::color_map::viridis);
                 ImageHelpers::pngSave(destinationDirectory + "/" + exposureFileName.toString(), pngMaxErrorExposureMap);
             }
         }
@@ -301,11 +300,10 @@ namespace FLIPTool
                 FLIP::image<float>* flipImage = intermediateLDRFLIPImages[0];
                 intermediateLDRFLIPImages.erase(intermediateLDRFLIPImages.begin());
 
-                FLIP::image<FLIP::float3> pngResult(flipImage->get_width(), flipImage->get_height());
-
+                FLIP::image<FLIP::float3> pngResult;
                 if (!commandLine.optionSet("no-magma"))
                 {
-                    pngResult.apply_color_map(*flipImage, FLIP::MagmaMap);
+                    pngResult = FLIP::apply_color_map(*flipImage, FLIP::color_map::magma);
                 }
                 else
                 {

@@ -30,7 +30,6 @@
     <ClInclude Include="..\tensor.h" />
     <ClInclude Include="..\vecs.h" />
     <ClInclude Include="..\gaussian.h" />
-    <ClInclude Include="..\float_vec.h" />
     <ClInclude Include="..\image.h" />
   </ItemGroup>
   <ItemGroup>

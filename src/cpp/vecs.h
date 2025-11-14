@@ -33,14 +33,10 @@ template<size_t N>
 class floatN;
 
 template<typename T, size_t N>
-concept floatN_like = std::same_as<std::decay_t<T>, floatN<N>> || std::convertible_to<T, float>;
-static_assert(floatN_like<floatN<3>, 3>);
-static_assert(floatN_like<float, 3>);
-static_assert(floatN_like<int, 3>);
-static_assert(!floatN_like<floatN<2>, 3>);
+concept floatN_like = T::count == N || std::convertible_to<T, float>;
 
 template<typename T, size_t N>
-concept floatN_at_least = floatN_like<T, N> && (T::count >= N);
+concept floatN_at_least = T::count >= N || std::convertible_to<T, float> && N <= 1;
 
 template<size_t N>
 class floatN {

@@ -137,5 +137,7 @@ template class tensor<float>;
 template class tensor<float2>;
 template class tensor<float3>;
 template class tensor<float4>;
+template class tensor<floatN<5>>;
+template class tensor<floatN<6>>;
 
 }

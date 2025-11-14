@@ -65,13 +65,6 @@
 
 namespace FLIP {
 
-struct parameters {
-    float ppd = calculate_ppd(0.7f, 3840.0f, 0.7f); // Populate PPD with default values based on 0.7 meters = distance to screen, 3840 pixels screen width, 0.7 meters monitor width.
-    exposure_range exposure;
-    int num_exposures = -1;                                                   // Used when the input is HDR.
-    tonemapper tonemapper = tonemapper::aces;                                 // Default tonemapper (used for HDR).
-};
-
 static constexpr struct FLIP_constants {
     float gqc = 0.7f;
     float gpc = 0.4f;
@@ -152,9 +145,9 @@ static exposure_range get_exposure_range(const image<T>& input, tonemapper toneM
     float Ymin = 1e30f;
     float Ymax = -1e30f;
     std::vector<float> luminances;
-    luminances.reserve(input.dims_.x() * input.dims_.y());
-    for(int y = 0; y < input.dims_.y(); y++) {
-        for(int x = 0; x < input.dims_.x(); x++) {
+    luminances.reserve(input.get_width() * input.get_height());
+    for(int y = 0; y < input.get_height(); y++) {
+        for(int x = 0; x < input.get_width(); x++) {
             float luminance = linear_rgb_to_luminance(input.get(x, y));
             luminances.push_back(luminance);
             if(luminance != 0.0f) {
@@ -542,7 +535,7 @@ void feature_difference_and_final_error(image<float>& resultImage, const image<T
 }
 
 template<typename T>
-image<float> FLIP_ldr(image<T>& reference, image<T>& test, float ppd)     // Both reference and test are assumed to be in linear RGB.
+static image<float> FLIP_ldr(image<T>& reference, image<T>& test, float ppd)     // Both reference and test are assumed to be in linear RGB.
 {
     // Transform from linear RGB to YCxCz.
     reference.linear_rgb_to_ycxcz();
@@ -571,21 +564,6 @@ image<float> FLIP_ldr(image<T>& reference, image<T>& test, float ppd)     // Bot
 static const image<float3> MagmaMap{ MapMagma };
 static const image<float3> ViridisMap{ MapViridis };
 
-/** Main function for computing (the image metric called) FLIP between a reference image and a test image.
- *  See FLIP-tool.cpp for usage of this function.
- *
- * @param[in] referenceImageInput Reference input image. For LDR, the content should be in [0,1]. Input is expected in linear RGB.
- * @param[in] testImageInput Test input image. For LDR, the content should be in [0,1]. Input is expected in linear RGB.
- * @param[in] useHDR Set to true if the input images are to be considered containing HDR content, i.e., not necessarily in [0,1].
- * @param[in,out] parameters Contains parameters (e.g., PPD, exposure settings,etc). If the exposures have not been set by the user, then those will be computed (and returned).
- * @param[out] errorMapFLIPOutput The FLIP error image in [0,1], a single channel (grayscale).
- * @param[out] maxErrorExposureMapOutput Exposure map output (only for HDR content).
- * @param[in] returnIntermediateLDRFLIPImages True if the next argument should be filled in by evaluate().
- * @param[out] intermediateLDRFLIPImages A list of temporary output LDR-FLIP error maps (in grayscale) from HDR-FLIP.
-               See explanation of the errorMapFLIPOutput parameter for how to convert the maps to magma.
- * @param[in] returnIntermediateLDRImages True if the next argument should be filled in by evaluate().
- * @param[out] intermediateLDRImages A list of temporary tonemapped output LDR images (in linear RGB) from HDR-FLIP. Images in this order: Ref0, Test0, Ref1, Test1,...
- */
 template<typename T>
 evaluate_status evaluate(const image<T>& referenceImageInput, const image<T>& testImageInput,
     const bool useHDR, parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput) {
@@ -599,7 +577,7 @@ evaluate_status evaluate(const image<T>& referenceImageInput, const image<T>& te
         // If startExposure/stopExposure are inf, they have not been set by the user. If so, compute from referenceImage.
         // See our paper about HDR-FLIP about the details.
         if(parameters.exposure.unbounded()) {
-            const auto exposureRange = referenceImage.get_exposure_range(parameters.tonemapper);
+            const auto exposureRange = get_exposure_range(referenceImage, parameters.tonemapper);
             if(std::isinf(parameters.exposure.min))
                 parameters.exposure.min = exposureRange.min;
             if(std::isinf(parameters.exposure.max))
@@ -621,8 +599,8 @@ evaluate_status evaluate(const image<T>& referenceImageInput, const image<T>& te
             const float exposure = parameters.exposure.min + static_cast<float>(i) * exposureStepSize;
             rImage.copy(referenceImage);
             tImage.copy(testImage);
-            rImage.expose(exposure);
-            tImage.expose(exposure);
+            expose(rImage, exposure);
+            expose(tImage, exposure);
             rImage.apply_tonemap(parameters.tonemapper);
             tImage.apply_tonemap(parameters.tonemapper);
             rImage.clamp();
@@ -638,6 +616,12 @@ evaluate_status evaluate(const image<T>& referenceImageInput, const image<T>& te
 
     return evaluate_status::success;
 }
+template
+evaluate_status evaluate<float3>(const image<float3>& referenceImageInput, const image<float3>& testImageInput,
+    const bool useHDR, parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput);
+template
+evaluate_status evaluate<float4>(const image<float4>& referenceImageInput, const image<float4>& testImageInput,
+    const bool useHDR, parameters& parameters, image<float>& errorMapFLIPOutput, image<float>& maxErrorExposureMapOutput);
 
 float get_mean_error(const image<float>& errorMapFLIPOutputImage) {
     float sum = 0.0f;
